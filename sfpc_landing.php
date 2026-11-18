@@ -267,9 +267,9 @@ $site = site_name();
   /* ── 그리기 ──────────────────────────────────── */
   var mx = -9999, my = -9999, kcHot = false;
   var charge = 0, flash = 0, run = 0, step = 0;
-  /* 초당 %. 한 마리가 쏘면 FILL, 여러 마리여도 FILL_MAX 까지. 아무도 없으면 DRAIN 씩 빠진다.
-     천천히 차야 한다 — 가득 차는 데 1분 넘게 걸리게 잡았다. */
-  var FILL = 1.1, FILL_MAX = 1.8, DRAIN = 1.2, FLASH = 1.6;
+  /* 초당 %. 쏘는 캐릭터 한 마리마다 FILL 씩 찬다 — 여럿이 쏘면 그만큼 빨라진다 (FILL_MAX 까지).
+     아무도 없으면 DRAIN 씩 빠진다. 한 마리면 가득 차는 데 40초쯤, 서너 마리가 모이면 10여 초. */
+  var FILL = 2.5, FILL_MAX = 10, DRAIN = 1.0, FLASH = 1.6;
 
   function rect(elm) {
     var r = elm.getBoundingClientRect(), e = lp.getBoundingClientRect();
