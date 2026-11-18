@@ -1,0 +1,134 @@
+/* ═══════════════════════════════════════════════
+   sfpc.css — SFPC 대회 화면 전용 스타일
+   색과 글꼴은 style.css 의 변수를 그대로 쓴다. 원본 style.css 는 고치지 않는다.
+   ═══════════════════════════════════════════════ */
+
+/* ── 첫 화면 띠 ─────────────────────────────── */
+.sfpc-band{background:var(--b800); color:#fff}
+.sfpc-band-in{max-width:var(--w); margin:0 auto; padding:44px 20px 40px}
+.sfpc-band .k{margin:0 0 6px; font-size:13.5px; font-weight:600; color:var(--b300); letter-spacing:.02em}
+.sfpc-band h1{margin:0; font-size:38px; line-height:1.25; font-weight:700; letter-spacing:-.03em}
+.sfpc-band .lead{margin:12px 0 0; font-size:16px; color:var(--b200); max-width:640px; word-break:keep-all}
+.sfpc-period{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:22px; font-size:15px}
+.sfpc-period b{font-weight:600}
+.sfpc-pill{display:inline-block; padding:3px 11px; border-radius:20px; font-size:12.5px; font-weight:700;
+           background:#fff; color:var(--b800)}
+.sfpc-pill.wait{background:var(--b600); color:#fff}
+.sfpc-pill.end{background:var(--b700); color:var(--b200)}
+
+/* ── 큰 버튼 둘 ─────────────────────────────── */
+.sfpc-pick{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:0 0 14px}
+.sfpc-pick a{display:block; border:1.5px solid var(--b200); border-radius:14px; padding:26px 26px 24px;
+             background:#fff; color:var(--ink); transition:border-color .12s, background .12s}
+.sfpc-pick a:hover{text-decoration:none; border-color:var(--b600); background:var(--b25)}
+.sfpc-pick .t{display:block; font-size:22px; font-weight:700; color:var(--b800); letter-spacing:-.025em}
+.sfpc-pick .d{display:block; margin-top:6px; font-size:14px; color:var(--ink-2); word-break:keep-all}
+.sfpc-pick .go{display:inline-block; margin-top:16px; font-size:14px; font-weight:700; color:var(--b600)}
+.sfpc-pick a.off{pointer-events:none; opacity:.55}
+@media(max-width:700px){
+  .sfpc-pick{grid-template-columns:1fr}
+  .sfpc-band h1{font-size:30px}
+}
+.sfpc-mine{display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:13px 16px; margin-bottom:26px;
+           border-radius:10px; background:var(--b50); font-size:14.5px}
+.sfpc-mine .grow{flex:1}
+
+/* ── 안내 ───────────────────────────────────── */
+.sfpc-info{display:grid; grid-template-columns:1fr 1fr; gap:14px 28px; margin-top:8px}
+.sfpc-info section h2{margin:0 0 6px; font-size:16px; font-weight:700; color:var(--b800)}
+.sfpc-info section p,.sfpc-info section li{font-size:14.5px; color:var(--ink-2); word-break:keep-all}
+.sfpc-info section ul{margin:0; padding-left:18px}
+.sfpc-info section p{margin:0}
+@media(max-width:700px){ .sfpc-info{grid-template-columns:1fr} }
+.sfpc-steps{display:flex; gap:10px; flex-wrap:wrap; margin:0; padding:0; list-style:none; counter-reset:s}
+.sfpc-steps li{flex:1 1 150px; border:1px solid var(--line); border-radius:10px; padding:12px 14px;
+               font-size:14px; color:var(--ink-2); counter-increment:s; word-break:keep-all}
+.sfpc-steps li::before{content:counter(s); display:block; font:700 13px var(--mono); color:var(--b400); margin-bottom:2px}
+.sfpc-steps li b{display:block; color:var(--b800); font-size:15px}
+
+/* ── 신청 양식 ───────────────────────────────── */
+.sfpc-form{max-width:760px}
+.sfpc-form fieldset{border:1px solid var(--line); border-radius:12px; padding:20px 22px 6px; margin:0 0 16px}
+.sfpc-form legend{padding:0 8px; font-size:15px; font-weight:700; color:var(--b800)}
+.sfpc-form .field input[type=text],.sfpc-form .field input[type=tel],.sfpc-form .field input[type=email],
+.sfpc-form .field input[type=password],.sfpc-form .field select{width:100%}
+.sfpc-form .field .hint{display:block; margin:5px 0 0}
+.sfpc-ro{display:flex; gap:18px; flex-wrap:wrap; align-items:center; font-size:14.5px; margin-bottom:16px}
+.sfpc-ro span b{color:var(--b800)}
+
+/* 학교 찾기 */
+.sfpc-school{position:relative}
+.sfpc-hits{position:absolute; z-index:5; left:0; right:0; top:100%; margin-top:4px; max-height:260px; overflow:auto;
+           background:#fff; border:1px solid var(--b300); border-radius:9px; box-shadow:0 8px 24px rgba(19,31,61,.12)}
+.sfpc-hits:empty{display:none}
+.sfpc-hits button{display:block; width:100%; text-align:left; border:0; background:none; cursor:pointer;
+                  padding:9px 13px; font:inherit; color:var(--ink); border-bottom:1px solid var(--line-2)}
+.sfpc-hits button:last-child{border-bottom:0}
+.sfpc-hits button:hover,.sfpc-hits button:focus{background:var(--b50); outline:none}
+.sfpc-hits button small{display:block; color:var(--ink-3); font-size:12.5px}
+.sfpc-hits .none{padding:11px 13px; font-size:13.5px; color:var(--ink-3)}
+.sfpc-picked{display:flex; align-items:center; gap:10px; padding:9px 13px; border-radius:8px;
+             background:var(--ok-soft); color:var(--ok); font-weight:600; font-size:14.5px}
+.sfpc-picked small{font-weight:400; color:var(--ink-2)}
+.sfpc-picked .grow{flex:1}
+
+/* 팀원 줄 */
+.sfpc-members{width:100%; border-collapse:collapse; margin-bottom:14px}
+.sfpc-members th{text-align:left; font-size:12.5px; font-weight:700; color:var(--b500); padding:0 8px 7px 0}
+.sfpc-members td{padding:0 8px 9px 0; vertical-align:middle}
+.sfpc-members td.n{width:74px; font-size:13.5px; font-weight:600; color:var(--ink-2); white-space:nowrap}
+.sfpc-members td.n small{display:block; font-weight:400; color:var(--ink-3); font-size:12px}
+.sfpc-members input,.sfpc-members select{width:100%}
+.sfpc-members .c-grade{width:110px} .sfpc-members .c-shirt{width:120px}
+.sfpc-hide{display:none !important}
+
+.sfpc-consent{border:1px solid var(--line); border-radius:9px; padding:13px 16px; margin-bottom:12px;
+              max-height:240px; overflow:auto; font-size:13.5px; color:var(--ink-2); background:var(--b25)}
+.sfpc-consent p{margin:0 0 6px} .sfpc-consent ul{margin:0 0 6px; padding-left:18px}
+.sfpc-agree{display:flex; align-items:flex-start; gap:8px; font-size:15px; font-weight:600; color:var(--b800); margin-bottom:20px}
+.sfpc-agree input{margin-top:5px}
+
+/* ── 내 팀 ───────────────────────────────────── */
+.sfpc-team{border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-bottom:12px; background:#fff}
+.sfpc-team.off{background:var(--b25); color:var(--ink-3)}
+.sfpc-team-h{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+.sfpc-team-h h2{margin:0; font-size:18px; font-weight:700; color:var(--b900); letter-spacing:-.02em}
+.sfpc-team-h .grow{flex:1}
+.sfpc-team .meta{margin:6px 0 0; font-size:14px; color:var(--ink-2)}
+.sfpc-team .mem{margin:8px 0 0; font-size:14px}
+.sfpc-team .mem span{display:inline-block; margin-right:12px; white-space:nowrap}
+.sfpc-team form{display:inline}
+.sfpc-no{font-family:var(--mono); font-size:12.5px; color:var(--b400)}
+
+/* ── 준비 중 ─────────────────────────────────── */
+.sfpc-soon{margin:50px 0; padding:44px 30px; border-radius:16px; background:var(--b25); text-align:center}
+.sfpc-soon-k{margin:0 0 6px; font-size:13.5px; font-weight:700; color:var(--b500)}
+.sfpc-soon h1{margin:0 0 10px; font-size:26px; font-weight:700; color:var(--b900); letter-spacing:-.025em}
+.sfpc-soon p{margin:0; color:var(--ink-2)}
+.sfpc-soon-sch{margin:20px auto 0; max-width:460px; text-align:left; font-size:14.5px}
+
+/* ── 첫 화면(index.php) 알림 띠 ─────────────── */
+.sfpc-banner{background:var(--b800); color:#fff}
+.sfpc-banner-in{max-width:var(--w); margin:0 auto; padding:13px 20px; display:flex; align-items:center; gap:14px; flex-wrap:wrap}
+.sfpc-banner b{font-size:15.5px}
+.sfpc-banner span{color:var(--b200); font-size:14px}
+.sfpc-banner .grow{flex:1}
+.sfpc-banner a.btn{border-color:#fff; background:#fff; color:var(--b800); font-weight:700}
+
+/* ── 운영 화면 ───────────────────────────────── */
+.sfpc-subtabs{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:20px}
+.sfpc-subtabs a{padding:6px 14px; border-radius:20px; font-size:14px; font-weight:600; color:var(--ink-2);
+                border:1px solid var(--line)}
+.sfpc-subtabs a:hover{text-decoration:none; border-color:var(--b300)}
+.sfpc-subtabs a.on{background:var(--b600); border-color:var(--b600); color:#fff}
+table.sfpc-grid{border-collapse:collapse; font-size:13.5px; min-width:100%}
+table.sfpc-grid th,table.sfpc-grid td{border:1px solid var(--line-2); padding:6px 10px; text-align:right; white-space:nowrap}
+table.sfpc-grid th{background:var(--b25); color:var(--b700); font-weight:700}
+table.sfpc-grid th:first-child,table.sfpc-grid td:first-child{text-align:left}
+table.sfpc-grid tr.sum td{font-weight:700; background:var(--b25)}
+table.sfpc-grid tr.host td:first-child{font-weight:700; color:var(--b700)}
+table.sfpc-grid td.z{color:var(--line)}
+.sfpc-flag{display:inline-block; font-size:11.5px; font-weight:700; padding:1px 7px; border-radius:20px;
+           background:var(--warn-soft); color:var(--warn); margin-left:4px}
+.sfpc-rowform{display:inline-flex; gap:4px; align-items:center}
+table.list td .sfpc-mem{font-size:13px; color:var(--ink-2)}

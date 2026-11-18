@@ -29,6 +29,7 @@ page_head(['title' => '', 'root' => '', 'user' => $u, 'nav' => '']);
   <h1 class="heroname"><?= h($site) ?></h1>
 </section>
 
+<?php sfpc_home_banner(); /* SFPC 접수 안내 띠 — 메뉴를 꺼 두면 나오지 않는다 */ ?>
 <div class="wrap home">
 
   <div class="homecols">

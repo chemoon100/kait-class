@@ -12,6 +12,7 @@
    ═══════════════════════════════════════════════ */
 
 require_once __DIR__ . '/Parsedown.php';
+require_once __DIR__ . '/sfpc_lib.php';   /* SFPC 대회 기능 — 메뉴와 운영 갈래에 쓴다 */
 
 /* 마크다운 → HTML.
    문제 설명은 관리자만 작성하므로 HTML 태그를 그대로 허용한다
@@ -114,6 +115,7 @@ function site_image_url(string $key, string $root = ''): string {
    1.17.0 — 공지사항 · 문제 모음 · 수업 · 평가는 교사도 학생과 같은 화면으로 간다.
    그 화면이 교사에게만 관리 버튼 · 정보를 더 보여 준다 (예전 admin/ 목록은 이리로 넘겨 준다). */
 const JNAV = [
+  'sfpc'        => ['SFPC',      'sfpc.php',        'sfpc.php',                        true,  false],   /* 운영 > SFPC > 설정에서 끌 수 있다 */
   'notices'     => ['공지사항',   'notices.php',     'notices.php',                     true,  false],
   'problems'    => ['문제 모음',  'problems.php',    'problems.php',                    true,  false],
   'tags'        => ['출처·분류',  'tags.php',        'tags.php',                        true,  false],
@@ -143,6 +145,7 @@ const OPS_TABS = [
   'judge'    => ['채점',  'judge.php'],
   'langs'    => ['언어',  'langs.php'],
   'settings' => ['설정',  'settings.php'],
+  'sfpc'     => ['SFPC',  'sfpc.php'],
 ];
 function ops_tabs(string $cur): string {
   $out = '<div class="tabbar">';
@@ -201,6 +204,7 @@ function page_head(array $o): void {
     <nav class="mainnav">
       <?php foreach (JNAV as $k => [$label, $sHref, $aHref, $guestOk, $adminOnly]): ?>
         <?php
+          if ($k === 'sfpc' && sfpc_setting('sfpc_menu_on') !== '1') continue;
           if (!$u && !$guestOk) continue;
           if ($adminOnly && ($u['role'] ?? '') !== 'admin') continue;
           $href = ($isAdminArea && $aHref !== '') ? $aHref : $sHref;
