@@ -157,20 +157,22 @@ function sfpc_school_csv(string $path): array {
   };
   $cName   = $pickCol(['학교명', 'SCHUL_NM']);
   $cRegion = $pickCol(['소재지명', '시도명', '시도', '지역', 'LCTN_SC_NM', '시도교육청명', 'ATPT_OFCDC_SC_NM']);
-  $cKind   = $pickCol(['학교종류명', '학교급', '학교급구분', 'SCHUL_KND_SC_NM']);
+  $cKind   = $pickCol(['학교종류명', '학교급구분', '학교급', 'SCHUL_KND_SC_NM']);
+  $cState  = $pickCol(['운영상태']);                      /* 공공데이터포털 표준데이터 — 폐교를 거른다 */
   $cType   = $pickCol(['고등학교구분명', '고교유형', 'HS_SC_NM']);
   $cAddr   = $pickCol(['도로명주소', '주소', 'ORG_RDNMA']);
-  $cCode   = $pickCol(['행정표준코드', '표준학교코드', '학교코드', 'SD_SCHUL_CODE']);
+  $cCode   = $pickCol(['행정표준코드', '표준학교코드', '학교코드', '학교ID', 'SD_SCHUL_CODE']);
   if ($cName < 0 || $cRegion < 0 || $cKind < 0) {
     return [0, '열 이름을 찾지 못했습니다. 첫 줄에 "학교명", "소재지명"(또는 시도), "학교종류명"(또는 학교급)이 있어야 합니다.'];
   }
   $rows = [];
   while (($r = fgetcsv($fp, 0, ',', '"', '')) !== false) $rows[] = $r;
   fclose($fp);
-  $n = tx(function (PDO $d) use ($rows, $cName, $cRegion, $cKind, $cType, $cAddr, $cCode) {
+  $n = tx(function (PDO $d) use ($rows, $cName, $cRegion, $cKind, $cType, $cAddr, $cCode, $cState) {
     $n = 0;
     foreach ($rows as $r) {
       $g = fn(int $i) => $i >= 0 ? (string)($r[$i] ?? '') : '';
+      if ($cState >= 0 && trim($g($cState)) !== '운영') continue;
       if (sfpc_school_put($d, $g($cCode), $g($cName), $g($cRegion), $g($cKind), $g($cType), $g($cAddr))) $n++;
     }
     return $n;
@@ -227,10 +229,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect_with('학교 ' . number_format($n) . '곳을 받아 넣었습니다.');
   }
 
+  if ($act === 'bundled') {
+    $n = sfpc_schools_load_bundled();
+    if (!$n) redirect_with('', '함께 넣어 둔 학교 목록 파일을 읽지 못했습니다.');
+    setting_set('sfpc_schools_at', now());
+    redirect_with('학교 ' . number_format($n) . '곳을 넣었습니다.');
+  }
+
   if ($act === 'csv') {
     if (DEMO_MODE) redirect_with('', DEMO_BLOCKED);
     $f = $_FILES['file'] ?? null;
-    if (!$f || ($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) redirect_with('', '파일을 받지 못했습니다.');
+    $ferr = $f['error'] ?? UPLOAD_ERR_NO_FILE;
+    if ($ferr === UPLOAD_ERR_INI_SIZE || $ferr === UPLOAD_ERR_FORM_SIZE)
+      redirect_with('', '파일이 서버가 한 번에 받을 수 있는 크기(' . ini_get('upload_max_filesize') . ')를 넘습니다. 중학교 · 고등학교 줄만 남겨 올려 주세요.');
+    if (!$f || $ferr !== UPLOAD_ERR_OK) redirect_with('', '파일을 받지 못했습니다.');
     if ($f['size'] > 8 * 1024 * 1024) redirect_with('', '파일은 8MB 까지 올릴 수 있습니다.');
     [$n, $e] = sfpc_school_csv($f['tmp_name']);
     if ($e !== '') redirect_with('', $e);
@@ -427,6 +439,17 @@ sfpc_css('../');
     <?php if (!$total): ?><br><span class="bad-text">목록이 비어 있으면 신청자가 학교 이름을 모두 직접 입력하게 됩니다.</span><?php endif; ?></p>
 
   <div class="sec" style="margin-top:0">
+    <h2>기본 목록</h2>
+    <p class="desc">프로그램에 함께 들어 있는 전국 중학교 · 고등학교 목록입니다. 설치하면 자동으로 들어가고, 목록이 꼬였을 때 여기서 다시 넣을 수 있습니다.
+      접수된 팀은 그대로입니다. 고등학교 유형(일반고 · 특성화고 등)은 들어 있지 않습니다.<br>
+      출처: <?= h(SFPC_SCHOOLS_SOURCE) ?></p>
+    <form method="post">
+      <?= sfpc_csrf_field() ?><input type="hidden" name="act" value="bundled">
+      <button class="btn" type="submit">기본 목록 다시 넣기</button>
+    </form>
+  </div>
+
+  <div class="sec">
     <h2>나이스에서 받아오기</h2>
     <p class="desc">나이스 교육정보 개방 포털(open.neis.go.kr)의 학교기본정보에서 전국 중학교 · 고등학교를 받아옵니다.
       인증키는 그 포털에 가입한 뒤 "인증키 신청"에서 받습니다. 다시 받으면 바뀐 학교 정보만 고쳐지고, 접수된 팀은 그대로입니다.</p>
@@ -440,7 +463,8 @@ sfpc_css('../');
   <div class="sec">
     <h2>CSV 파일로 올리기</h2>
     <p class="desc">서버에서 나이스에 연결되지 않을 때 씁니다. 첫 줄에 열 이름이 있어야 합니다 —
-      <b>학교명</b>, <b>소재지명</b>(또는 시도), <b>학교종류명</b>(또는 학교급: 중학교 · 고등학교), 그리고 있으면 고등학교구분명 · 도로명주소.</p>
+      <b>학교명</b>, <b>소재지명</b>(또는 시도 · 시도교육청명), <b>학교종류명</b>(또는 학교급구분: 중학교 · 고등학교), 그리고 있으면 고등학교구분명 · 도로명주소.
+      공공데이터포털의 전국초중등학교위치표준데이터 CSV 를 그대로 올려도 됩니다.</p>
     <form method="post" enctype="multipart/form-data" class="searchbar">
       <?= sfpc_csrf_field() ?><input type="hidden" name="act" value="csv">
       <input type="file" name="file" accept=".csv,text/csv" required>

@@ -6,6 +6,7 @@
        sudo -u www-data php sfpc-cli.php status    지금 설정과 접수 현황
        sudo -u www-data php sfpc-cli.php open      접수 시작일을 어제로 — 시험 서버에서 접수를 미리 열어 볼 때
        sudo -u www-data php sfpc-cli.php reset     접수 기간을 기본값으로 되돌린다
+       sudo -u www-data php sfpc-cli.php schools   함께 넣어 둔 학교 목록을 다시 넣는다
 
    ★ open 은 시험 서버용이다. 운영 서버에서 쓰면 접수가 실제로 열린다.
    서버 화면(VNC)에서는 밑줄 · 따옴표 같은 글자가 잘 입력되지 않아,
@@ -24,8 +25,12 @@ if ($cmd === 'open') {
   setting_set('sfpc_apply_from', SFPC_DEFAULTS['sfpc_apply_from']);
   setting_set('sfpc_apply_to',   SFPC_DEFAULTS['sfpc_apply_to']);
   echo "접수 기간을 기본값으로 되돌렸습니다.\n";
+} elseif ($cmd === 'schools') {
+  $n = sfpc_schools_load_bundled();
+  if ($n) setting_set('sfpc_schools_at', now());
+  echo "학교 " . $n . "곳을 넣었습니다.\n";
 } elseif ($cmd !== 'status') {
-  fwrite(STDERR, "쓸 수 있는 명령: status | open | reset\n");
+  fwrite(STDERR, "쓸 수 있는 명령: status | open | reset | schools\n");
   exit(1);
 }
 

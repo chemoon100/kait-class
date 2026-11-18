@@ -28,6 +28,6 @@ $rows = all("SELECT id, name, level, hs_type, addr FROM sfpc_schools
              ORDER BY (name LIKE ? ESCAPE '\\') DESC, name LIMIT 30", $args);
 jout(['ok' => true, 'schools' => array_map(fn($r) => [
   'id' => (int)$r['id'], 'name' => $r['name'],
-  'hs_type' => $r['level'] === 'high' ? $r['hs_type'] : '중학교',
+  'hs_type' => $r['level'] === 'high' ? ($r['hs_type'] !== '' ? $r['hs_type'] : '고등학교') : '중학교',
   'addr' => $r['addr'],
 ], $rows)]);

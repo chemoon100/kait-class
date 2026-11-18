@@ -54,16 +54,20 @@ sfpc_css();
     </div>
   <?php endif; ?>
 
+  <h2 class="sfpc-pick-h"><?= $canApply ? '어떤 팀으로 신청하시나요?' : ($state === 'before' ? '참가 신청은 접수 기간에 열립니다' : '참가 접수가 마감되었습니다') ?>
+    <?php if ($canApply): ?><span>아래에서 하나를 눌러 신청을 시작하세요</span><?php endif; ?></h2>
   <div class="sfpc-pick">
-    <a href="<?= h($go('student')) ?>" class="<?= $canApply ? '' : 'off' ?>">
+    <a href="<?= h($go('student')) ?>" class="k-student<?= $canApply ? '' : ' off' ?>">
+      <span class="who">중학생 · 고등학생</span>
       <span class="t">학생 팀 신청</span>
-      <span class="d">중학생 · 고등학생 2~4명이 한 팀입니다. 소속 학교 정보 선생님이 지도교사로 신청합니다.</span>
-      <span class="go"><?= $canApply ? '신청하기 →' : ($state === 'before' ? '접수 기간에 열립니다' : '접수가 마감되었습니다') ?></span>
+      <span class="d">학생 2~4명이 한 팀입니다. 소속 학교 정보 선생님이 지도교사로 신청합니다.</span>
+      <span class="go"><?= $canApply ? '학생 팀 신청하기 →' : ($state === 'before' ? '접수 기간에 열립니다' : '접수가 마감되었습니다') ?></span>
     </a>
-    <a href="<?= h($go('teacher')) ?>" class="<?= $canApply ? '' : 'off' ?>">
+    <a href="<?= h($go('teacher')) ?>" class="k-teacher<?= $canApply ? '' : ' off' ?>">
+      <span class="who">교사 · 예비교사</span>
       <span class="t">교사 · 예비교사 팀 신청</span>
       <span class="d">현직 정보 교사, 사범대 컴퓨터교육과 재학생 · 졸업생 1~4명이 한 팀입니다.</span>
-      <span class="go"><?= $canApply ? '신청하기 →' : ($state === 'before' ? '접수 기간에 열립니다' : '접수가 마감되었습니다') ?></span>
+      <span class="go"><?= $canApply ? '교사 팀 신청하기 →' : ($state === 'before' ? '접수 기간에 열립니다' : '접수가 마감되었습니다') ?></span>
     </a>
   </div>
   <p class="small muted" style="margin:0 0 30px">

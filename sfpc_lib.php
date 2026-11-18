@@ -14,14 +14,21 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib.php';
 
 /* 표 구조를 바꿀 때마다 1씩 올린다 */
-const SFPC_SCHEMA = 1;
+const SFPC_SCHEMA = 2;
 
 /* 올해 대회. 내년에는 이 값과 설정만 바꾸면 접수를 새로 받을 수 있다. */
 const SFPC_CONTEST = '2026';
 
-/* 17개 시도 — 접수 화면에 이 순서로 나온다 */
-const SFPC_REGIONS = ['서울','부산','대구','인천','광주','대전','울산','세종','경기',
-                      '강원','충북','충남','전북','전남','경북','경남','제주'];
+/* 16개 시도 — 접수 화면에 이 순서로 나온다.
+   2026년 7월 1일 광주광역시와 전라남도가 전남광주통합특별시로 합쳐져 17개에서 16개가 되었다. */
+const SFPC_REGIONS = ['서울','부산','대구','인천','대전','울산','세종','경기',
+                      '강원','충북','충남','전북','전남광주','경북','경남','제주'];
+
+/* 저장소에 함께 넣어 둔 전국 중 · 고등학교 목록 (운영 중인 학교만).
+   출처: 공공데이터포털 '전국초중등학교위치표준데이터' (한국교육시설안전원), 2026-10-01 기준.
+   고등학교 유형(일반고 · 특성화고 …)은 이 자료에 없다. */
+const SFPC_SCHOOLS_FILE = __DIR__ . '/sfpc_schools.csv';
+const SFPC_SCHOOLS_SOURCE = '공공데이터포털 전국초중등학교위치표준데이터 (한국교육시설안전원, 2026-10-01 기준)';
 
 /* 참가 구분.
    kind   학생 팀인지 교사 팀인지 (첫 화면의 큰 버튼 둘)
@@ -128,9 +135,38 @@ function sfpc_ensure_schema(PDO $p): void {
     CREATE INDEX IF NOT EXISTS idx_sfpc_member ON sfpc_members(team_id, seq);
   ");
 }
+/* 함께 넣어 둔 학교 목록(sfpc_schools.csv)을 표에 넣는다. 넣은 수를 돌려준다.
+   같은 학교 코드는 고쳐 쓰므로 여러 번 불러도 된다. */
+function sfpc_schools_load_bundled(): int {
+  if (!is_file(SFPC_SCHOOLS_FILE) || !($fp = fopen(SFPC_SCHOOLS_FILE, 'r'))) return 0;
+  fgetcsv($fp, 0, ',', '"', '');                       /* 첫 줄은 열 이름 */
+  $rows = [];
+  while (($r = fgetcsv($fp, 0, ',', '"', '')) !== false) if (count($r) >= 4) $rows[] = $r;
+  fclose($fp);
+  return (int)tx(function (PDO $d) use ($rows) {
+    $st = $d->prepare("INSERT INTO sfpc_schools(code, name, region, level, hs_type, addr) VALUES(?,?,?,?,'',?)
+                       ON CONFLICT(code) DO UPDATE SET name = excluded.name, region = excluded.region,
+                         level = excluded.level, addr = excluded.addr");
+    $n = 0;
+    foreach ($rows as $r) {
+      if (!in_array($r[2], SFPC_REGIONS, true) || !in_array($r[3], ['middle', 'high'], true)) continue;
+      $st->execute([$r[0], $r[1], $r[2], $r[3], $r[4] ?? '']);
+      $n++;
+    }
+    return $n;
+  });
+}
+
 /* 요청마다 CREATE TABLE 을 돌리지 않게, 설정에 적어 둔 버전과 다를 때만 */
 if ((int)sfpc_setting('sfpc_schema') !== SFPC_SCHEMA) {
   sfpc_ensure_schema(db());
+  /* 2 — 광주 · 전남이 전남광주로 합쳐졌다. 먼저 받아 둔 팀과 학교의 지역 이름을 맞춘다. */
+  db()->exec("UPDATE sfpc_teams   SET region = '전남광주' WHERE region IN ('광주', '전남')");
+  db()->exec("UPDATE sfpc_schools SET region = '전남광주' WHERE region IN ('광주', '전남')");
+  /* 학교 목록이 비어 있으면 함께 넣어 둔 목록으로 채운다 — 설치만 하면 학교 찾기가 바로 된다 */
+  if ((int)db()->query("SELECT COUNT(*) FROM sfpc_schools")->fetchColumn() === 0 && sfpc_schools_load_bundled() > 0) {
+    setting_set('sfpc_schools_at', now());
+  }
   setting_set('sfpc_schema', (string)SFPC_SCHEMA);
 }
 
@@ -198,15 +234,18 @@ function sfpc_clean(string $s, int $max): string {
 /* ── 학교 목록 ───────────────────────────────────── */
 function sfpc_school_count(): int { return (int)col("SELECT COUNT(*) FROM sfpc_schools"); }
 
-/* 나이스의 '서울특별시' · '강원특별자치도' · '충청북도' 같은 이름을 '서울' · '강원' · '충북' 으로 */
+/* '서울특별시' · '강원특별자치도교육청' · '충청북도' 같은 이름을 '서울' · '강원' · '충북' 으로.
+   광주 · 전남은 옛 이름으로 적혀 있어도 '전남광주' 로 모은다. */
 function sfpc_region_short(string $s): string {
   $s = trim($s);
-  $map = ['충청북' => '충북', '충청남' => '충남', '전라북' => '전북', '전라남' => '전남',
-          '경상북' => '경북', '경상남' => '경남', '전북특' => '전북', '강원특' => '강원',
+  $map = ['충청북' => '충북', '충청남' => '충남', '전라북' => '전북', '전북특' => '전북',
+          '전라남' => '전남광주', '전남광' => '전남광주', '광주광' => '전남광주',
+          '경상북' => '경북', '경상남' => '경남', '강원특' => '강원',
           '제주특' => '제주', '세종특' => '세종'];
   $head3 = function_exists('mb_substr') ? mb_substr($s, 0, 3) : substr($s, 0, 9);
   if (isset($map[$head3])) return $map[$head3];
   $head2 = function_exists('mb_substr') ? mb_substr($s, 0, 2) : substr($s, 0, 6);
+  if ($head2 === '광주' || $head2 === '전남') return '전남광주';
   return in_array($head2, SFPC_REGIONS, true) ? $head2 : '';
 }
 /** '중학교' → middle, '고등학교' → high, 그 밖은 '' (목록에 넣지 않는다) */
