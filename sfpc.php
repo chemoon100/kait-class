@@ -72,6 +72,24 @@ sfpc_css();
   </p>
 
   <div class="sec" style="margin-top:0">
+    <h2>어떤 대회인가요</h2>
+    <div class="sfpc-info" style="margin-top:10px">
+      <section>
+        <ul>
+          <li><b>누구나 도전하는 대회</b> — 수업에서 배운 프로그래밍만으로 풀 수 있는 문제부터 시작합니다. 출력문만 알아도 풀 수 있는 문제가 많습니다.</li>
+          <li><b>친구와 함께</b> — 학생 2~4명이 한 팀이 되어 같이 문제를 해결합니다.</li>
+        </ul>
+      </section>
+      <section>
+        <ul>
+          <li><b>오픈북</b> — 책, 필기, 인터넷 자료를 모두 볼 수 있습니다.</li>
+          <li><b>정보 선생님이 만드는 대회</b> — 전국의 정보 교사들이 문제를 내고 운영합니다. 신청도 지도교사가 합니다.</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+
+  <div class="sec">
     <h2>신청 순서</h2>
     <ol class="sfpc-steps" style="margin-top:10px">
       <li><b>지도교사 가입</b>아이디와 연락처를 등록합니다.</li>

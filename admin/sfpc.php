@@ -211,7 +211,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     setting_set('sfpc_schedule', trim((string)($_POST['schedule'] ?? '')));
     setting_set('sfpc_privacy', trim((string)($_POST['privacy'] ?? '')));
     setting_set('sfpc_contact', sfpc_clean((string)($_POST['contact'] ?? ''), 100));
-    foreach (['menu_on', 'contest_open', 'board_open'] as $k) setting_set('sfpc_' . $k, !empty($_POST[$k]) ? '1' : '0');
+    foreach (['menu_on', 'landing_on', 'contest_open', 'board_open'] as $k) setting_set('sfpc_' . $k, !empty($_POST[$k]) ? '1' : '0');
     redirect_with('설정을 저장했습니다.');
   }
 
@@ -490,6 +490,8 @@ sfpc_css('../');
       <legend>화면 공개</legend>
       <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="menu_on" value="1"<?= sfpc_setting('sfpc_menu_on') === '1' ? ' checked' : '' ?>>
         위쪽 메뉴와 첫 화면에 SFPC 보이기</label>
+      <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="landing_on" value="1"<?= sfpc_setting('sfpc_landing_on') === '1' ? ' checked' : '' ?>>
+        접수 전 · 접수 중에는 사이트 첫 화면을 SFPC 안내로 바꾸기 <a href="../sfpc_landing.php" target="_blank" rel="noopener" style="margin-left:6px">미리 보기</a></label>
       <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="contest_open" value="1"<?= sfpc_setting('sfpc_contest_open') === '1' ? ' checked' : '' ?>>
         대회 참가 화면 공개</label>
       <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="board_open" value="1"<?= sfpc_setting('sfpc_board_open') === '1' ? ' checked' : '' ?>>

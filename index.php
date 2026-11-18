@@ -4,6 +4,7 @@ declare(strict_types=1);
 require __DIR__ . '/guard.php';
 require __DIR__ . '/layout.php';
 $u = me();
+sfpc_landing_gate($u);   /* 접수 기간에는 첫 화면이 SFPC 안내로 바뀐다 (sfpc_lib.php) */
 
 /* 로그인 전 첫 화면은 제목판이 커서, 공지를 4개까지만 보여야
    1920×1080 화면에서 스크롤 없이 들어온다. */

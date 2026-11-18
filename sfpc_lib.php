@@ -56,6 +56,7 @@ const SFPC_DEFAULTS = [
   'sfpc_privacy'      => '',                     // 개인정보 수집·이용 안내 (마크다운). 비면 기본 문구
   'sfpc_contact'      => 'kaiteachers2013@gmail.com',
   'sfpc_menu_on'      => '1',                    // 위쪽 메뉴에 SFPC 보이기
+  'sfpc_landing_on'   => '1',                    // 접수 전 · 접수 중에 첫 화면을 SFPC 안내로 (sfpc_landing.php)
   'sfpc_contest_open' => '0',                    // 대회 참가 화면 공개
   'sfpc_board_open'   => '0',                    // 스코어보드 공개
   'sfpc_neis_key'     => '',                     // 나이스 교육정보 개방 포털 인증키
@@ -291,4 +292,20 @@ function sfpc_home_banner(): void {
 function sfpc_path(string $file): string {
   $dir = rtrim(str_replace('\\', '/', dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/'))), '/');
   return $dir . '/' . ltrim($file, '/');
+}
+
+/* ── 접수 기간의 첫 화면 ──────────────────────────
+   접수 전 · 접수 중에는 사이트 첫 화면(index.php) 대신 SFPC 안내(sfpc_landing.php)를 보여 준다.
+     · 로그인한 사람은 건너뛴다 (수업 · 평가를 보러 온 사람)
+     · "KAIT-CLASS 이동하기"(index.php?home=1)를 누른 사람은 그 뒤로 기존 첫 화면을 본다
+     · 접수가 끝나면 자동으로 기존 첫 화면으로 돌아간다 */
+function sfpc_landing_active(): bool {
+  return sfpc_setting('sfpc_menu_on') === '1' && sfpc_setting('sfpc_landing_on') === '1'
+      && sfpc_apply_state() !== 'closed';
+}
+function sfpc_landing_gate(?array $u): void {
+  if (isset($_GET['home'])) $_SESSION['sfpc_home'] = 1;
+  if ($u || !empty($_SESSION['sfpc_home']) || !sfpc_landing_active()) return;
+  require __DIR__ . '/sfpc_landing.php';
+  exit;
 }

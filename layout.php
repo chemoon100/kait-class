@@ -310,6 +310,7 @@ function page_foot(string $root = ''): void {
     </div>
     <div class="small foot-lic">
       글꼴 <a href="https://github.com/orioncactus/pretendard" target="_blank" rel="noopener">Pretendard</a> (SIL OFL 1.1)
+      · <a href="https://github.com/quiple/galmuri" target="_blank" rel="noopener">Galmuri</a> (SIL OFL 1.1)
       <span class="sep">·</span>
       편집기 <a href="https://codemirror.net/5/" target="_blank" rel="noopener">CodeMirror 5</a> (MIT)
       <span class="sep">·</span>
