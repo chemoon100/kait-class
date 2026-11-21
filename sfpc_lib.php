@@ -14,7 +14,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib.php';
 
 /* 표 구조를 바꿀 때마다 1씩 올린다 */
-const SFPC_SCHEMA = 4;
+const SFPC_SCHEMA = 5;
 
 /* 올해 대회. 내년에는 이 값과 설정만 바꾸면 접수를 새로 받을 수 있다. */
 const SFPC_CONTEST = '2026';
@@ -185,6 +185,10 @@ if ((int)sfpc_setting('sfpc_schema') !== SFPC_SCHEMA) {
   if (!in_array('account_pw_at', array_column(db()->query("PRAGMA table_info(sfpc_teams)")->fetchAll(PDO::FETCH_ASSOC), 'name'), true)) {
     db()->exec("ALTER TABLE sfpc_teams ADD COLUMN account_pw_at TEXT NOT NULL DEFAULT ''");
   }
+  /* 5 — 팀 캐릭터 (고른 부품을 JSON 으로). 비어 있으면 팀 번호로 정해지는 기본 캐릭터가 나온다. */
+  if (!in_array('avatar', array_column(db()->query("PRAGMA table_info(sfpc_teams)")->fetchAll(PDO::FETCH_ASSOC), 'name'), true)) {
+    db()->exec("ALTER TABLE sfpc_teams ADD COLUMN avatar TEXT NOT NULL DEFAULT ''");
+  }
   /* 학교 목록이 비어 있으면 함께 넣어 둔 목록으로 채운다 — 설치만 하면 학교 찾기가 바로 된다 */
   if ((int)db()->query("SELECT COUNT(*) FROM sfpc_schools")->fetchColumn() === 0 && sfpc_schools_load_bundled() > 0) {
     setting_set('sfpc_schools_at', now());
@@ -313,6 +317,52 @@ function sfpc_my_team(?array $u): ?array {
 /* 팀 계정으로는 접수 화면(신청 · 내 팀 · 지도교사 가입)을 쓰지 않는다 — 팀 화면으로 보낸다 */
 function sfpc_coach_only(?array $u): void {
   if ($u && ($u['source'] ?? '') === SFPC_ACCOUNT_SOURCE) { header('Location: ' . sfpc_path('sfpc_me.php')); exit; }
+}
+
+/* ── 팀 캐릭터 ────────────────────────────────────
+   부품 여섯 가지를 골라 만든다. 그림은 sfpc_char.js 가 그리고, 여기에는 고를 수 있는 값과 이름만 둔다
+   (두 파일의 값 이름이 같아야 한다). 색은 번호다. */
+const SFPC_CHAR = [
+  'b' => ['label' => '몸', 'items' => ['robot' => '로봇', 'slime' => '슬라임', 'ghost' => '유령', 'cat' => '고양이', 'bread' => '식빵',
+                                        'potato' => '감자', 'alien' => '외계인', 'tofu' => '두부', 'dumpling' => '만두', 'cactus' => '선인장']],
+  'c' => ['label' => '색', 'items' => ['보라', '청록', '주황', '분홍', '파랑', '노랑', '연두', '회색', '빨강', '하양']],
+  'e' => ['label' => '눈', 'items' => ['big' => '큰 눈', 'dot' => '점', 'smile' => '웃는 눈', 'sleepy' => '졸린 눈', 'cyclops' => '외눈',
+                                        'spin' => '뱅글뱅글', 'tear' => '눈물 글썽', 'odd' => '짝눈', 'heart' => '하트눈', 'visor' => '바이저']],
+  'm' => ['label' => '입', 'items' => ['none' => '없음', 'tongue' => '메롱', 'grin' => '씨익', 'o' => '뻐끔', 'drool' => '침 흘림',
+                                        'cat' => '고양이 입', 'frown' => '시무룩', 'mustache' => '콧수염']],
+  'h' => ['label' => '머리', 'items' => ['none' => '없음', 'antenna' => '안테나', 'crown' => '왕관', 'sprout' => '새싹', 'egg' => '계란후라이',
+                                         'banana' => '바나나 껍질', 'pot' => '냄비', 'leek' => '대파', 'question' => '물음표', 'exclaim' => '느낌표',
+                                         'flowerpot' => '화분', 'book' => '책', 'party' => '고깔모자']],
+  'f' => ['label' => '이동 효과', 'items' => ['none' => '없음', 'sparkle' => '반짝이', 'bolt' => '번개', 'fire' => '불꽃', 'bits' => '0과 1',
+                                              'fart' => '방귀 구름', 'sweat' => '땀방울', 'note' => '음표', 'heart' => '하트', 'leaf' => '낙엽']],
+];
+/* 보낸 값에서 허용된 것만 남긴다. 하나라도 틀리면 null */
+function sfpc_char_clean($in): ?array {
+  if (!is_array($in)) return null;
+  $out = [];
+  foreach (SFPC_CHAR as $k => $part) {
+    $v = $in[$k] ?? null;
+    if ($k === 'c') { if (!is_int($v) && !(is_string($v) && ctype_digit($v))) return null; $v = (int)$v; }
+    elseif (!is_string($v)) return null;
+    if (!array_key_exists($v, $part['items'])) return null;
+    $out[$k] = $v;
+  }
+  return $out;
+}
+/* 아직 꾸미지 않은 팀의 캐릭터 — 팀 번호로 정해져 늘 같다 */
+function sfpc_char_default(int $teamId): array {
+  $out = []; $n = $teamId * 2654435761 % 4294967296;
+  foreach (SFPC_CHAR as $k => $part) {
+    $keys = array_keys($part['items']);
+    $out[$k] = $keys[$n % count($keys)];
+    $n = intdiv($n, 7) + $teamId * 31;
+  }
+  $out['f'] = 'none';
+  return $out;
+}
+function sfpc_char_of(array $t): array {
+  $c = ($t['avatar'] ?? '') !== '' ? sfpc_char_clean(json_decode((string)$t['avatar'], true)) : null;
+  return $c ?? sfpc_char_default((int)$t['id']);
 }
 
 /* ── 변경 기록 ───────────────────────────────────── */

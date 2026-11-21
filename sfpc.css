@@ -214,3 +214,15 @@ table.sfpc-pvlinks td a:hover{text-decoration:none; background:var(--b50)}
 .sfpc-me-links a span{font-size:13px; color:var(--ink-3)}
 @media (max-width:640px){ .sfpc-me-grid, .sfpc-me-links{grid-template-columns:1fr} .sfpc-me-h .ids{text-align:left} }
 .sfpc-me-h .tag{background:none; padding:0; border:0}
+
+/* ── 캐릭터 꾸미기 ─────────────────────────────── */
+.sfpc-ch-stage{display:block; width:100%; height:auto; border-radius:14px; background:#140A24; image-rendering:pixelated; margin-bottom:18px}
+.sfpc-ch-row{display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-bottom:1px solid var(--line)}
+.sfpc-ch-row .lab{flex:0 0 76px; padding-top:6px; font-size:14px; font-weight:700; color:var(--b800)}
+.sfpc-ch-row .opts{display:flex; flex-wrap:wrap; gap:6px}
+.sfpc-ch-row button{font:inherit; font-size:13.5px; padding:5px 12px; border-radius:20px; border:1px solid var(--line); background:#fff; color:var(--ink-2); cursor:pointer}
+.sfpc-ch-row button:hover{border-color:var(--b400)}
+.sfpc-ch-row button.on{background:var(--b700); border-color:var(--b700); color:#fff; font-weight:700}
+.sfpc-ch-row button.sw{width:30px; height:30px; padding:0; border-radius:50%; border:1px solid rgba(0,0,0,.15)}
+.sfpc-ch-row button.sw.on{box-shadow:0 0 0 2px #fff, 0 0 0 4px var(--b700)}
+.sfpc-me-card.char canvas.stage{display:block; width:100%; height:auto; border-radius:10px; background:#140A24; image-rendering:pixelated; margin-bottom:10px}

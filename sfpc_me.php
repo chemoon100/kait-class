@@ -51,9 +51,9 @@ sfpc_css();
   <div class="sfpc-me-grid">
     <section class="sfpc-me-card char">
       <h2>우리 팀 캐릭터</h2>
-      <div class="ph" aria-hidden="true"><span></span></div>
-      <p>대회 화면과 스코어보드에서 우리 팀을 나타낼 캐릭터를 꾸밉니다.</p>
-      <span class="soon">곧 열립니다</span>
+      <canvas id="meChar" width="320" height="120" class="stage" role="img" aria-label="우리 팀 캐릭터"></canvas>
+      <p><?= $team['avatar'] !== '' ? '대회 화면과 스코어보드에 이 캐릭터로 나옵니다.' : '아직 꾸미지 않아 기본 캐릭터가 나옵니다. 우리 팀만의 캐릭터로 바꿔 보세요.' ?></p>
+      <?php if (!$viewAs): ?><a class="btn primary sm" href="sfpc_char.php" style="margin-top:10px">캐릭터 꾸미기</a><?php endif; ?>
     </section>
 
     <section class="sfpc-me-card">
@@ -78,4 +78,23 @@ sfpc_css();
   <?php endif; ?>
   <?php endif; ?>
 </div>
+<?php if (!$off): ?>
+<script src="<?= asset('sfpc_char.js', '') ?>"></script>
+<script>
+(function () {
+  var S = <?= json_encode(sfpc_char_of($team)) ?>, c = document.getElementById('meChar'), g = c.getContext('2d');
+  var P = 6, x = 40, dir = 1, tk = 0, puffs = [], still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function frame() {
+    tk++; g.clearRect(0, 0, c.width, c.height);
+    if (!still) { x += dir * .8; if (x > c.width - 16 * P - 10) dir = -1; if (x < 10) dir = 1; }
+    if (!still && tk % 6 === 0) { var p = SfpcChar.puff(S, x, 12, P, dir); if (p) puffs.push(p); }
+    puffs = puffs.filter(function (p) { return SfpcChar.drawPuff(g, p, P); });
+    SfpcChar.draw(g, S, Math.round(x), 12 + (!still && Math.floor(tk / 16) % 2 ? -P / 2 : 0), P, dir, tk);
+    if (!still && !document.hidden) requestAnimationFrame(frame);
+  }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && !still) requestAnimationFrame(frame); });
+  frame();
+})();
+</script>
+<?php endif; ?>
 <?php page_foot(); ?>
