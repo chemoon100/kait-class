@@ -189,6 +189,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if (!sfpc_csrf_ok()) redirect_with('', '화면을 연 지 오래되었습니다. 다시 시도해 주세요.');
   $act = (string)($_POST['act'] ?? '');
 
+  /* 안내 문구 미리 보기 — 저장하지 않고, 적은 마크다운이 화면에 어떻게 나오는지만 돌려준다 */
+  if ($act === 'preview') {
+    jout(['ok' => true, 'html' => md(mb_substr((string)($_POST['text'] ?? ''), 0, 20000))]);
+  }
+
   if ($act === 'team') {
     $t = sfpc_team((int)($_POST['id'] ?? 0));
     if (!$t) redirect_with('', '팀을 찾지 못했습니다.');
@@ -722,14 +727,42 @@ sfpc_css('../');
 
     <fieldset>
       <legend>안내 문구</legend>
-      <div class="field"><label for="ss">대회 일정 <span class="hint" style="display:inline">접수 첫 화면과 준비 중 화면에 나옵니다 · 마크다운</span></label>
-        <textarea id="ss" name="schedule" rows="5" style="width:100%" placeholder="- 공부하기: 1월 ○일 ~ ○일&#10;- 준비하기: 1월 ○일 10:00&#10;- 도전하기: 1월 ○일 10:00"><?= h(sfpc_setting('sfpc_schedule')) ?></textarea></div>
+      <div class="field"><label for="ss">대회 일정 <span class="hint" style="display:inline">접수 안내 화면과 준비 중 화면에 나옵니다 · 마크다운</span></label>
+        <textarea id="ss" name="schedule" rows="5" style="width:100%" placeholder="- 공부하기: 1월 ○일 ~ ○일&#10;- 준비하기: 1월 ○일 10:00&#10;- 도전하기: 1월 ○일 10:00"><?= h(sfpc_setting('sfpc_schedule')) ?></textarea>
+        <div class="btnrow" style="margin-top:8px"><button class="btn sm" type="button" data-preview="ss" data-empty="공부하기 · 준비하기 · 도전하기 일정은 곧 알려 드립니다.">미리 보기</button>
+          <span class="small muted">저장하기 전에 어떻게 나오는지 봅니다</span></div>
+        <div class="sfpc-preview sfpc-hide" id="pv-ss"><p class="cap">접수 안내 화면의 "대회 일정"에 이렇게 나옵니다</p><div class="md"></div></div></div>
       <div class="field"><label for="sp">개인정보 수집 · 이용 안내 <span class="hint" style="display:inline">비워 두면 기본 문구가 나옵니다 · 마크다운</span></label>
-        <textarea id="sp" name="privacy" rows="7" style="width:100%"><?= h(sfpc_setting('sfpc_privacy')) ?></textarea></div>
+        <textarea id="sp" name="privacy" rows="7" style="width:100%"><?= h(sfpc_setting('sfpc_privacy')) ?></textarea>
+        <div class="btnrow" style="margin-top:8px"><button class="btn sm" type="button" data-preview="sp" data-empty="">미리 보기</button>
+          <span class="small muted">저장하기 전에 어떻게 나오는지 봅니다</span></div>
+        <div class="sfpc-preview sfpc-hide" id="pv-sp"><p class="cap">팀 신청 양식의 동의 칸에 이렇게 나옵니다</p><div class="sfpc-consent md" style="margin:0"></div></div></div>
     </fieldset>
 
     <button class="btn primary" type="submit" style="padding:10px 24px">저장</button>
   </form>
+  <script>
+  /* 안내 문구 미리 보기 — 서버가 마크다운을 실제 화면과 같은 방식으로 바꿔 돌려준다. 저장은 하지 않는다. */
+  document.querySelectorAll('[data-preview]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var ta = document.getElementById(btn.dataset.preview), box = document.getElementById('pv-' + btn.dataset.preview);
+      var out = box.querySelector('.md'), text = ta.value.trim();
+      box.classList.remove('sfpc-hide');
+      if (text === '') {
+        out.textContent = btn.dataset.empty || '비어 있습니다. 저장하면 기본 문구가 나옵니다.';
+        return;
+      }
+      var fd = new FormData();
+      fd.append('act', 'preview'); fd.append('text', text);
+      fd.append('csrf', document.querySelector('input[name=csrf]').value);
+      out.textContent = '불러오는 중…';
+      fetch('sfpc.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { out.innerHTML = d.html; })
+        .catch(function () { out.textContent = '미리 보기를 불러오지 못했습니다.'; });
+    });
+  });
+  </script>
 <?php endif; ?>
 </div>
 <?php page_foot('../'); ?>
