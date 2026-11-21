@@ -38,6 +38,10 @@ if ($host !== '' && str_ends_with($title, $host)) {
 $target = sfpc_ts(sfpc_setting($state === 'before' ? 'sfpc_apply_from' : 'sfpc_apply_to'));
 $days   = $target ? (int)round((strtotime(date('Y-m-d', $target)) - strtotime(date('Y-m-d'))) / 86400) : 0;
 $dday   = $state === 'closed' ? '' : ($days <= 0 ? 'D-DAY' : 'D-' . $days);
+/* 운영진 미리 보기(?as=) — 실제 날짜와 다른 시기를 보는 중이라 남은 날을 셀 수 없으면 자리만 보여 준다 */
+$pv = sfpc_preview();
+if ($pv !== null && $pv !== 'guest' && $days <= 0 && $dday !== '') $dday = 'D-○';
+$pvq = ($pv !== null && $pv !== 'guest') ? '?as=' . $pv : '';
 $ddayLabel = $state === 'before' ? '접수 시작까지' : '접수 마감까지';
 
 $teamCnt = (int)col("SELECT COUNT(*) FROM sfpc_teams WHERE contest = ? AND status = 'submitted'", [SFPC_CONTEST]);
@@ -52,6 +56,7 @@ $site = site_name();
 <title><?= h($title) ?> · <?= h($site) ?></title>
 <?php $fav = site_image_url('favicon'); if ($fav !== ''): ?><link rel="icon" href="<?= $fav ?>"><?php endif; ?>
 <link rel="stylesheet" href="<?= asset('style.css') ?>">
+<link rel="stylesheet" href="<?= asset('sfpc.css') ?>">
 <link rel="preload" href="<?= asset('fonts/Galmuri11-Bold.woff2') ?>" as="font" type="font/woff2" crossorigin>
 <style>
 @font-face{
@@ -81,7 +86,7 @@ $site = site_name();
        border:1px solid var(--violet); background:var(--bg)}
 .lp-kc:hover,.lp-kc:focus-visible{color:#FAC775; border-color:#FAC775}
 
-.lp-main{position:relative; flex:1; display:flex; align-items:center; gap:40px; padding:24px 40px 190px}
+.lp-main{position:relative; flex:1; display:flex; align-items:center; gap:80px; padding:24px 40px 190px}
 .lp-left{flex:1; min-width:0}
 .lp-cmd{margin:0 0 22px; font-size:12px; color:var(--teal)}
 /* 제목 — 글자는 화면 읽기 프로그램과 스크립트가 꺼진 경우를 위해 남기고, 점은 캔버스가 그 자리에 찍는다 */
@@ -132,6 +137,7 @@ $site = site_name();
 </style>
 </head>
 <body>
+<?php sfpc_preview_bar(); ?>
 <main class="lp" id="lp" data-main="<?= h($titleMain) ?>" data-key="<?= h($titleKey) ?>">
   <canvas aria-hidden="true"></canvas>
 
@@ -147,7 +153,7 @@ $site = site_name();
       <h1 class="lp-title" id="lpTitle"><?= h($titleMain) ?><?= $titleKey !== '' ? ' <b>' . h($titleKey) . '</b>' : '' ?></h1>
       <p class="lp-date">참가 접수 <?= h($period) ?></p>
       <div class="lp-btns">
-        <a class="lp-go" id="lpGo" href="sfpc.php"><span>&gt; <?= $state === 'open' ? '접수하기' : '접수 안내' ?></span></a>
+        <a class="lp-go" id="lpGo" href="sfpc.php<?= h($pvq) ?>"><span>&gt; <?= $state === 'open' ? '접수하기' : '접수 안내' ?></span></a>
         <div class="lp-stage" id="lpStage" aria-hidden="true"></div>
         <?php if ($state !== 'before'): ?>
           <a class="lp-edit" href="sfpc_teams.php">접수 확인 · 수정</a>

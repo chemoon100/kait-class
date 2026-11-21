@@ -559,6 +559,8 @@ sfpc_css('../');
                   <?php endif; ?>
                   <button class="btn sm primary" type="submit">저장</button>
                 </form>
+                <p class="small muted" style="margin:14px 0 6px">이 선생님에게 보이는 화면</p>
+                <div class="btnrow"><a class="btn sm" href="../sfpc_teams.php?coach=<?= (int)$c['user_id'] ?>">내 팀 화면 보기</a></div>
                 <p class="small muted" style="margin:14px 0 6px">이 선생님 이름으로 팀 넣기 — 접수 기간이 아니어도 됩니다</p>
                 <div class="btnrow">
                   <a class="btn sm" href="../sfpc_team.php?kind=student&coach=<?= (int)$c['user_id'] ?>">학생 팀</a>
@@ -723,6 +725,26 @@ sfpc_css('../');
       <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="board_open" value="1"<?= sfpc_setting('sfpc_board_open') === '1' ? ' checked' : '' ?>>
         스코어보드 공개</label>
       <p class="small muted" style="margin:0 0 16px">공개하지 않은 화면은 "준비 중" 안내만 보입니다. 운영진 계정으로는 공개 전에도 들어가 볼 수 있습니다.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>방문자 화면 미리 보기</legend>
+      <p class="small muted" style="margin:0 0 12px">접수 시기마다 방문자에게 보이는 모습입니다. 설정을 바꾸지 않고 운영진만 볼 수 있습니다. 새 창으로 열립니다.</p>
+      <table class="sfpc-pvlinks">
+        <tr><th>첫 화면</th><td>
+          <a href="../sfpc_landing.php?as=before" target="_blank" rel="noopener">접수 전</a>
+          <a href="../sfpc_landing.php?as=open" target="_blank" rel="noopener">접수 중</a>
+          <span class="muted">마감 후에는 기존 첫 화면으로 돌아갑니다</span></td></tr>
+        <tr><th>접수 안내</th><td>
+          <a href="../sfpc.php?as=before" target="_blank" rel="noopener">접수 전</a>
+          <a href="../sfpc.php?as=open" target="_blank" rel="noopener">접수 중</a>
+          <a href="../sfpc.php?as=closed" target="_blank" rel="noopener">마감 후</a></td></tr>
+        <tr><th>준비 중 안내</th><td>
+          <a href="../sfpc_contest.php?as=guest" target="_blank" rel="noopener">대회 참가</a>
+          <a href="../sfpc_board.php?as=guest" target="_blank" rel="noopener">스코어보드</a>
+          <span class="muted">공개 전에 방문자가 보는 화면</span></td></tr>
+      </table>
+      <p class="small muted" style="margin:12px 0 16px">지도교사 한 사람의 화면은 <a href="?tab=coaches">지도교사</a> 탭의 "관리 → 내 팀 화면 보기"에서 봅니다.</p>
     </fieldset>
 
     <fieldset>

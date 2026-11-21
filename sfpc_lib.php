@@ -192,8 +192,30 @@ function sfpc_ts(string $s): int {
   $t = strtotime(str_replace('T', ' ', trim($s)));
   return $t === false ? 0 : $t;
 }
+/* ── 운영진 미리 보기 ─────────────────────────────
+   주소에 ?as=before | open | closed 를 붙이면, 운영진에게만, 그 시기의 화면을 방문자 눈으로 보여 준다.
+   설정은 바뀌지 않는다 — 접수가 진행 중인 운영 서버에서 기간을 바꿔 가며 확인할 수는 없기 때문이다.
+   ?as=guest 는 "준비 중" 화면처럼 운영진이 그냥은 볼 수 없는 방문자 화면을 보여 준다. */
+const SFPC_AS_NAME = ['before' => '접수 전', 'open' => '접수 중', 'closed' => '마감 후', 'guest' => '방문자'];
+function sfpc_preview(): ?string {
+  static $v = false;
+  if ($v === false) {
+    $s = (string)($_GET['as'] ?? '');
+    $v = (isset(SFPC_AS_NAME[$s]) && is_admin(me())) ? $s : null;
+  }
+  return $v;
+}
+function sfpc_preview_bar(): void {
+  $p = sfpc_preview();
+  if ($p === null) return;
+  echo '<div class="sfpc-pvbar"><b>미리 보기 · ' . h(SFPC_AS_NAME[$p]) . ' 모습</b>'
+     . '<span>방문자에게 이렇게 보입니다. 운영진에게만 보이는 화면이고, 설정은 바뀌지 않았습니다.</span></div>';
+}
+
 /** 'before' | 'open' | 'closed' */
 function sfpc_apply_state(): string {
+  $p = sfpc_preview();
+  if ($p !== null && $p !== 'guest') return $p;
   $now  = time();
   $from = sfpc_ts(sfpc_setting('sfpc_apply_from'));
   $to   = sfpc_ts(sfpc_setting('sfpc_apply_to'));
@@ -349,12 +371,13 @@ function sfpc_status_badge(array $t): string {
    돌려주는 값이 true 면 부른 쪽이 화면을 이어서 그린다. */
 function sfpc_gate(string $settingKey, string $title, ?array $u): bool {
   if (sfpc_setting($settingKey) === '1') return true;
-  if (is_admin($u)) {
+  if (is_admin($u) && sfpc_preview() !== 'guest') {
     echo '<div class="wrap" style="padding-bottom:0"><div class="note admin-preview" style="margin:0">'
        . '아직 공개하지 않은 화면입니다. 운영진에게만 보입니다. 운영 &gt; SFPC &gt; 설정에서 공개합니다.</div></div>';
     return true;
   }
   $schedule = trim(sfpc_setting('sfpc_schedule'));
+  sfpc_preview_bar();
   echo '<div class="wrap narrow"><div class="sfpc-soon">'
      . '<p class="sfpc-soon-k">' . h(sfpc_setting('sfpc_title')) . '</p>'
      . '<h1>' . h($title) . ' 화면은 준비 중입니다</h1>'

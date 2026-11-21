@@ -1,18 +1,31 @@
 <?php
 /* ═══════════════════════════════════════════════
    sfpc_teams.php — 내 팀. 지도교사가 신청한 팀을 보고, 고치고, 취소한다.
+
+   ?coach=계정번호 — 운영진이 그 지도교사의 화면을 본다 (보기만 한다. 버튼은 나오지 않는다).
+   "제 화면에 팀이 안 보여요" 같은 문의에 답할 때, 비밀번호를 묻지 않고 확인하려는 것이다.
    ═══════════════════════════════════════════════ */
 declare(strict_types=1);
 require __DIR__ . '/guard.php';
 require __DIR__ . '/layout.php';
 $u = need_login();
-$coach = sfpc_coach($u);
-if (!$coach) { header('Location: sfpc_join.php?next=sfpc_teams.php'); exit; }
+/* 운영진이 다른 지도교사의 화면을 보는 경우 */
+$viewAs = is_admin($u) ? (int)($_GET['coach'] ?? 0) : 0;
+if ($viewAs) {
+  $coach = one("SELECT * FROM sfpc_coaches WHERE user_id = ?", [$viewAs]);
+  if (!$coach) { header('Location: admin/sfpc.php?tab=coaches'); exit; }
+} else {
+  $coach = sfpc_coach($u);
+  if (!$coach) { header('Location: sfpc_join.php?next=sfpc_teams.php'); exit; }
+}
+$ownerId = $viewAs ?: (int)$u['id'];
 
-$canEdit = sfpc_can_edit($u);
+/* 보는 중에는 아무것도 바꾸지 못한다. 그 교사에게 버튼이 보일지는 접수 기간으로만 정해진다. */
+$canEdit = $viewAs ? false : sfpc_can_edit($u);
+$wouldEdit = sfpc_apply_state() === 'open';
 
 /* 취소 · 취소 철회 */
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$viewAs) {
   $t   = sfpc_team((int)($_POST['id'] ?? 0));
   $act = (string)($_POST['act'] ?? '');
   if (!sfpc_csrf_ok())                                   redirect_with('', '화면을 연 지 오래되었습니다. 다시 시도해 주세요.');
@@ -32,12 +45,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 [$msg, $err] = flash_take();
-$teams = sfpc_teams_of((int)$u['id']);
+$teams = sfpc_teams_of($ownerId);
 $state = sfpc_apply_state();
 
 page_head(['title' => '내 팀', 'root' => '', 'user' => $u, 'nav' => 'sfpc']);
 sfpc_css();
 ?>
+<?php if ($viewAs): ?>
+  <div class="sfpc-pvbar"><b><?= h($coach['name']) ?> 선생님의 화면 · 보기 전용</b>
+    <span>이 선생님이 로그인하면 보는 "내 팀" 화면입니다.
+      <?= $wouldEdit ? '지금은 접수 기간이라 선생님 화면에는 팀마다 수정 · 신청 취소 버튼이 함께 보입니다.' : '지금은 접수 기간이 아니라 선생님 화면에도 수정 버튼이 없습니다.' ?>
+      <a href="admin/sfpc.php?tab=coaches&q=<?= rawurlencode((string)col("SELECT login_id FROM users WHERE id = ?", [$viewAs])) ?>">지도교사 관리로 돌아가기</a></span></div>
+<?php endif; ?>
 <div class="wrap narrow">
   <div class="phead">
     <h1>내 팀</h1>
@@ -56,7 +75,7 @@ sfpc_css();
     <span>신청인 <b><?= h($coach['name']) ?></b></span>
     <span>연락처 <b><?= h($coach['phone']) ?></b></span>
     <?php if ($coach['email'] !== ''): ?><span><?= h($coach['email']) ?></span><?php endif; ?>
-    <a class="btn sm" href="sfpc_join.php?next=sfpc_teams.php">내 정보 수정</a>
+    <?php if (!$viewAs): ?><a class="btn sm" href="sfpc_join.php?next=sfpc_teams.php">내 정보 수정</a><?php endif; ?>
   </div>
 
   <?php if (!$teams): ?>

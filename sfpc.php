@@ -13,6 +13,9 @@ $coach = sfpc_coach($u);
 $state = sfpc_apply_state();
 $canApply = sfpc_can_edit($u);
 $mine  = $coach ? array_filter(sfpc_teams_of((int)$u['id']), fn($t) => $t['status'] !== 'canceled') : [];
+/* 운영진 미리 보기(?as=) — 방문자 눈으로 본다: 기간 밖이면 버튼이 잠기고, 운영진용 안내는 나오지 않는다 */
+$pv = sfpc_preview();
+if ($pv !== null) { $canApply = ($state === 'open'); $mine = []; }
 
 /* 버튼이 갈 곳 — 지도교사 정보가 있으면 바로 양식, 없으면 가입부터 */
 $go = function (string $kind) use ($coach): string {
@@ -25,6 +28,7 @@ $contact  = trim(sfpc_setting('sfpc_contact'));
 
 page_head(['title' => sfpc_setting('sfpc_title'), 'root' => '', 'user' => $u, 'nav' => 'sfpc']);
 sfpc_css();
+sfpc_preview_bar();
 ?>
 <section class="sfpc-band">
   <div class="sfpc-band-in">
@@ -42,7 +46,7 @@ sfpc_css();
 </section>
 
 <div class="wrap">
-  <?php if ($state !== 'open' && is_admin($u)): ?>
+  <?php if ($state !== 'open' && is_admin($u) && $pv === null): ?>
     <div class="note admin-preview">접수 기간이 아닙니다. 운영진은 기간 밖에서도 신청 화면을 눌러 볼 수 있습니다.</div>
   <?php endif; ?>
 
