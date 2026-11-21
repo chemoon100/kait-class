@@ -76,6 +76,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         session_regenerate_id(true);
         $_SESSION['uid'] = $uid;
       }
+      if ($coach) {
+        $chg = [];
+        if ($coach['name']  !== $in['name'])  $chg[] = '이름: ' . $coach['name'] . ' → ' . $in['name'];
+        if ($coach['phone'] !== $phone)       $chg[] = '연락처: ' . $coach['phone'] . ' → ' . $phone;
+        if ($coach['email'] !== $in['email']) $chg[] = '이메일: ' . ($coach['email'] ?: '없음') . ' → ' . ($in['email'] ?: '없음');
+        if ($chg) sfpc_log(null, (int)$uid, $u, 'coach', implode("\n", $chg));
+      }
       $_SESSION['flash'] = ['msg' => $coach ? '정보를 고쳤습니다.' : '등록했습니다. 이제 팀을 신청할 수 있습니다.', 'err' => ''];
       header('Location: ' . $next);
       exit;

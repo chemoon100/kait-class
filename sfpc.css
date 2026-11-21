@@ -145,3 +145,14 @@ table.sfpc-grid td.z{color:var(--line)}
            background:var(--warn-soft); color:var(--warn); margin-left:4px}
 .sfpc-rowform{display:inline-flex; gap:4px; align-items:center}
 table.list td .sfpc-mem{font-size:13px; color:var(--ink-2)}
+
+/* 팀별 변경 기록 (운영 > SFPC > 팀 목록 > 관리) */
+.sfpc-hist{margin-top:14px; padding-top:12px; border-top:1px solid var(--line-2); font-size:12.5px; max-width:300px}
+.sfpc-hist > b{display:block; margin-bottom:6px; color:var(--b700); font-size:12.5px}
+.sfpc-hist .h{padding:6px 0; border-bottom:1px dashed var(--line-2)}
+.sfpc-hist .h:last-child{border-bottom:0}
+.sfpc-hist .when{font-family:var(--mono); color:var(--ink-3)}
+.sfpc-hist .who{font-weight:600; margin-left:4px}
+.sfpc-hist .who.adm{color:var(--warn)}
+.sfpc-hist .act{color:var(--b600); margin-left:4px}
+.sfpc-hist .d{margin-top:2px; color:var(--ink-2); word-break:break-all}

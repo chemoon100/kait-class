@@ -3,7 +3,11 @@
    sfpc_team.php — 팀 신청 양식 (새로 내기 · 고치기)
 
      ?kind=student | teacher   새 팀
-     ?id=N                     내 팀 고치기 (운영진은 모든 팀)
+     ?id=N                     내 팀 고치기 (운영진은 모든 팀, 접수 기간이 아니어도)
+     ?kind=…&coach=계정번호     운영진이 그 지도교사 이름으로 새 팀을 넣는다 (마감 뒤 누락 접수)
+
+   운영진이 남의 팀을 다룰 때는 개인정보 동의 칸이 나오지 않는다 — 동의는 지도교사가 하는 것이다.
+   새로 내기 · 고치기는 모두 변경 기록(sfpc_log)에 남는다.
 
    학교는 sfpc_schools 목록에서 찾아 고른다. 목록에 없으면 직접 적고,
    그런 팀은 school_manual = 1 로 남겨 운영진이 확인할 수 있게 한다.
@@ -22,12 +26,19 @@ if ($id && (!$team || ((int)$team['coach_user_id'] !== (int)$u['id'] && !is_admi
 $kind = $team ? $team['kind'] : (string)($_GET['kind'] ?? $_POST['kind'] ?? '');
 if (!isset(SFPC_KIND_NAME[$kind])) { header('Location: sfpc.php'); exit; }
 
-if (!$team && !$coach) {
+/* 운영진이 지도교사를 대신해 새 팀을 넣는 경우 */
+$forCoach = (!$team && is_admin($u)) ? (int)($_GET['coach'] ?? $_POST['coach'] ?? 0) : 0;
+if ($forCoach && !one("SELECT 1 FROM sfpc_coaches WHERE user_id = ?", [$forCoach])) {
+  header('Location: admin/sfpc.php?tab=coaches'); exit;
+}
+if (!$team && !$coach && !$forCoach) {
   header('Location: sfpc_join.php?next=' . rawurlencode('sfpc_team.php?kind=' . $kind)); exit;
 }
-/* 운영진이 남의 팀을 고칠 때는 그 팀의 지도교사 정보를 보여 준다 */
-$owner = $team ? one("SELECT * FROM sfpc_coaches WHERE user_id = ?", [$team['coach_user_id']]) : $coach;
-$back  = ($team && (int)$team['coach_user_id'] !== (int)$u['id']) ? 'admin/sfpc.php?tab=teams' : 'sfpc_teams.php';
+/* 이 팀의 지도교사 — 내 팀이면 나, 운영진이 다루는 남의 팀이면 그 사람 */
+$ownerId = $team ? (int)$team['coach_user_id'] : ($forCoach ?: (int)$u['id']);
+$owner   = one("SELECT * FROM sfpc_coaches WHERE user_id = ?", [$ownerId]);
+$byAdmin = is_admin($u) && $ownerId !== (int)$u['id'];
+$back    = $byAdmin ? 'admin/sfpc.php?tab=teams' : 'sfpc_teams.php';
 
 if (!sfpc_can_edit($u)) { header('Location: sfpc_teams.php'); exit; }
 if ($team && $team['status'] === 'canceled' && !is_admin($u)) { header('Location: sfpc_teams.php'); exit; }
@@ -50,8 +61,8 @@ $in = [
 if ($team) {
   foreach (sfpc_team_members((int)$team['id']) as $m)
     $in['members'][] = ['name' => $m['name'], 'grade' => (int)$m['grade'], 'shirt' => $m['shirt']];
-} elseif ($kind === 'teacher' && $coach) {
-  $in['members'][] = ['name' => $coach['name'], 'grade' => 0, 'shirt' => ''];   /* 신청인이 첫 팀원인 경우가 대부분 */
+} elseif ($kind === 'teacher' && $owner) {
+  $in['members'][] = ['name' => $owner['name'], 'grade' => 0, 'shirt' => ''];   /* 신청인이 첫 팀원인 경우가 대부분 */
 }
 
 $errs = [];
@@ -113,7 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $nameList = array_column($members, 'name');
   if (count($nameList) !== count(array_unique($nameList))) $errs[] = '같은 이름의 팀원이 두 번 들어갔습니다. 동명이인이면 이름 뒤에 A, B 를 붙여 주세요.';
 
-  if (empty($_POST['agree'])) $errs[] = '개인정보 수집 · 이용에 동의해야 신청할 수 있습니다.';
+  if (!$byAdmin && empty($_POST['agree'])) $errs[] = '개인정보 수집 · 이용에 동의해야 신청할 수 있습니다.';
 
   /* 같은 학교에 같은 팀명이 있으면 스코어보드에서 구분되지 않는다 */
   if (!$errs && one("SELECT 1 FROM sfpc_teams WHERE contest = ? AND status = 'submitted' AND school_name = ?
@@ -123,22 +134,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   if (!$errs) {
     $manual = $in['school_id'] > 0 ? 0 : 1;
-    $newId = tx(function (PDO $d) use ($team, $u, $kind, $in, $cat, $onsite, $manual, $members) {
+    $oldMembers = $team ? sfpc_team_members((int)$team['id']) : [];
+    $newId = tx(function (PDO $d) use ($team, $ownerId, $byAdmin, $kind, $in, $cat, $onsite, $manual, $members) {
+      /* 동의한 때 — 지도교사가 저장할 때만 새로 적는다. 운영진이 고칠 때는 그대로 두고,
+         운영진이 대신 넣은 팀은 비워 둔다 (동의를 화면에서 받지 않았다는 표시). */
       if ($team) {
         /* 참가 구분이 바뀌었을 때만 참가 자격을 처음 값으로 되돌린다 (운영진이 바꾼 값을 지키려고) */
         $track = $team['category'] === $in['category'] ? $team['track'] : $cat['track'];
         $d->prepare("UPDATE sfpc_teams SET category=?, region=?, school_id=?, school_name=?, school_manual=?,
                        team_name=?, track=?, onsite=?, consent_at=?, updated_at=? WHERE id=?")
           ->execute([$in['category'], $in['region'], $in['school_id'] ?: null, $in['school_name'], $manual,
-                     $in['team_name'], $track, $onsite ? 1 : 0, now(), now(), $team['id']]);
+                     $in['team_name'], $track, $onsite ? 1 : 0, $byAdmin ? $team['consent_at'] : now(), now(), $team['id']]);
         $tid = (int)$team['id'];
         $d->prepare("DELETE FROM sfpc_members WHERE team_id = ?")->execute([$tid]);
       } else {
         $d->prepare("INSERT INTO sfpc_teams(contest, coach_user_id, kind, category, region, school_id, school_name,
                        school_manual, team_name, track, onsite, status, consent_at, created_at, updated_at)
                      VALUES(?,?,?,?,?,?,?,?,?,?,?,'submitted',?,?,?)")
-          ->execute([SFPC_CONTEST, $u['id'], $kind, $in['category'], $in['region'], $in['school_id'] ?: null,
-                     $in['school_name'], $manual, $in['team_name'], $cat['track'], $onsite ? 1 : 0, now(), now(), now()]);
+          ->execute([SFPC_CONTEST, $ownerId, $kind, $in['category'], $in['region'], $in['school_id'] ?: null,
+                     $in['school_name'], $manual, $in['team_name'], $cat['track'], $onsite ? 1 : 0, $byAdmin ? '' : now(), now(), now()]);
         $tid = (int)$d->lastInsertId();
       }
       $ins = $d->prepare("INSERT INTO sfpc_members(team_id, seq, name, grade, shirt) VALUES(?,?,?,?,?)");
@@ -147,6 +161,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       }
       return $tid;
     });
+    /* 변경 기록 */
+    $newMembers = array_map(fn($m) => ['name' => $m['name'], 'grade' => $kind === 'student' ? $m['grade'] : 0,
+                                       'shirt' => $onsite ? $m['shirt'] : ''], $members);
+    if ($team) {
+      $diff = sfpc_team_diff($team, $oldMembers, $in, $newMembers);
+      if ($diff !== '') sfpc_log((int)$team['id'], $ownerId, $u, 'edit', $diff);
+    } else {
+      sfpc_log((int)$newId, $ownerId, $u, 'create',
+        ($byAdmin ? "운영진이 대신 접수\n" : '') . $in['region'] . ' · ' . $cat['label'] . ' · ' . $in['school_name'] . ' · ' . $in['team_name']
+        . "\n팀원: " . implode(', ', array_map('sfpc_member_text', $newMembers)));
+    }
     $_SESSION['flash'] = ['msg' => '"' . $in['team_name'] . '" 팀 ' . ($team ? '내용을 고쳤습니다.' : '신청을 접수했습니다.'), 'err' => ''];
     header('Location: ' . $back);
     exit;
@@ -180,13 +205,14 @@ sfpc_css();
     <?= sfpc_csrf_field() ?>
     <input type="hidden" name="kind" value="<?= h($kind) ?>">
     <?php if ($team): ?><input type="hidden" name="id" value="<?= (int)$team['id'] ?>"><?php endif; ?>
+    <?php if ($forCoach): ?><input type="hidden" name="coach" value="<?= $forCoach ?>"><?php endif; ?>
 
     <fieldset>
       <legend><?= $kind === 'student' ? '지도교사' : '신청인(대표자)' ?></legend>
       <div class="sfpc-ro">
         <span>이름 <b><?= h($owner['name'] ?? '') ?></b></span>
         <span>연락처 <b><?= h($owner['phone'] ?? '') ?></b></span>
-        <?php if ($back === 'sfpc_teams.php'): ?><a class="btn sm" href="sfpc_join.php?next=sfpc_teams.php">내 정보 수정</a><?php endif; ?>
+        <?php if (!$byAdmin): ?><a class="btn sm" href="sfpc_join.php?next=sfpc_teams.php">내 정보 수정</a><?php endif; ?>
       </div>
     </fieldset>
 
@@ -277,6 +303,10 @@ sfpc_css();
         <?= $kind === 'student' ? '학생 2~4명이 한 팀입니다.' : '1~4명이 한 팀입니다. 신청인도 참가한다면 팀원에 넣어 주세요.' ?></p>
     </fieldset>
 
+    <?php if ($byAdmin): ?>
+      <div class="note admin-preview" style="margin:0 0 20px">운영진이 <b><?= h($owner['name'] ?? '') ?></b> 선생님의 팀을 <?= $team ? '고치는' : '대신 접수하는' ?> 중입니다.
+        저장하면 바뀐 내용이 변경 기록에 남습니다. 접수 기간이 아니어도 저장됩니다.</div>
+    <?php else: ?>
     <fieldset>
       <legend>개인정보 수집 · 이용 동의</legend>
       <div class="sfpc-consent md">
@@ -295,6 +325,7 @@ sfpc_css();
         <span>위 내용을 확인했으며, 팀원 모두(만 14세 미만은 보호자)의 동의를 받았습니다.</span>
       </label>
     </fieldset>
+    <?php endif; ?>
 
     <div class="btnrow">
       <button class="btn primary" type="submit" style="padding:11px 26px; font-size:15px"><?= $team ? '저장' : '신청하기' ?></button>
@@ -394,7 +425,7 @@ sfpc_css();
     var msg = '';
     if (searching() && !sid.value && q.value.trim() !== '')
       msg = '학교를 목록에서 골라 주세요. 목록에 없으면 "목록에 우리 학교가 없어서 직접 입력합니다"를 체크하세요.';
-    else if (!document.getElementById('agree').checked)
+    else if (document.getElementById('agree') && !document.getElementById('agree').checked)
       msg = '개인정보 수집 · 이용에 동의해야 신청할 수 있습니다.';
     if (msg) {
       e.preventDefault();

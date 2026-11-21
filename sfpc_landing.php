@@ -2,8 +2,8 @@
 /* ═══════════════════════════════════════════════
    sfpc_landing.php — 접수 기간의 첫 화면 (화면 전체를 쓰는 SFPC 안내)
 
-   index.php 가 sfpc_landing_gate() 로 이 파일을 끼워 넣는다 (로그인하지 않은 방문자에게,
-   접수 전 · 접수 중에만). 주소로 직접 열면 언제든 볼 수 있다 — 운영진 미리 보기용.
+   index.php 가 sfpc_landing_gate() 로 이 파일을 끼워 넣는다 (접수 전 · 접수 중에,
+   사이트 주소로 들어온 모든 방문자에게). 주소로 직접 열면 언제든 볼 수 있다 — 운영진 미리 보기용.
 
    화면 구성
      · 점으로 찍은 제목 "2026 SFPC 충북" (전광판)
@@ -150,7 +150,7 @@ $site = site_name();
         <a class="lp-go" id="lpGo" href="sfpc.php"><span>&gt; <?= $state === 'open' ? '접수하기' : '접수 안내' ?></span></a>
         <div class="lp-stage" id="lpStage" aria-hidden="true"></div>
         <?php if ($state !== 'before'): ?>
-          <a class="lp-edit" href="login.php?next=<?= rawurlencode(sfpc_path('sfpc_teams.php')) ?>">접수 확인 · 수정</a>
+          <a class="lp-edit" href="sfpc_teams.php">접수 확인 · 수정</a>
         <?php endif; ?>
       </div>
     </div>

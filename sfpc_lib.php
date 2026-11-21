@@ -14,7 +14,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib.php';
 
 /* 표 구조를 바꿀 때마다 1씩 올린다 */
-const SFPC_SCHEMA = 2;
+const SFPC_SCHEMA = 3;
 
 /* 올해 대회. 내년에는 이 값과 설정만 바꾸면 접수를 새로 받을 수 있다. */
 const SFPC_CONTEST = '2026';
@@ -133,6 +133,23 @@ function sfpc_ensure_schema(PDO $p): void {
       shirt   TEXT NOT NULL DEFAULT ''         -- 현장 참가자만
     );
     CREATE INDEX IF NOT EXISTS idx_sfpc_member ON sfpc_members(team_id, seq);
+
+    -- 변경 기록. 누가 언제 무엇을 바꿨는지 남긴다 (마감 뒤 운영진이 명단을 고칠 때 근거가 된다).
+    -- team_id 가 비면 팀이 아닌 것(지도교사 정보)에 대한 기록이다. 지우지 않는다.
+    CREATE TABLE IF NOT EXISTS sfpc_log(
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      contest  TEXT NOT NULL,
+      team_id  INTEGER,
+      coach_user_id INTEGER,                   -- 기록의 대상인 지도교사 (팀 기록이면 그 팀의 지도교사)
+      actor_user_id INTEGER,                   -- 바꾼 사람
+      actor_name TEXT NOT NULL,                -- 바꾼 사람의 그때 이름 (계정이 지워져도 남게)
+      by_admin INTEGER NOT NULL DEFAULT 0,     -- 1 이면 운영진이 바꿨다
+      action   TEXT NOT NULL,                  -- create · edit · cancel · restore · admin · coach
+      detail   TEXT NOT NULL DEFAULT '',       -- 사람이 읽는 변경 내용. 줄바꿈으로 여러 항목
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sfpc_log_team ON sfpc_log(team_id, id);
+    CREATE INDEX IF NOT EXISTS idx_sfpc_log_time ON sfpc_log(contest, id);
   ");
 }
 /* 함께 넣어 둔 학교 목록(sfpc_schools.csv)을 표에 넣는다. 넣은 수를 돌려준다.
@@ -205,6 +222,41 @@ function sfpc_phone(string $s): string {
   if (preg_match('/^(02)(\d{3,4})(\d{4})$/', $d, $m))         return "$m[1]-$m[2]-$m[3]";
   if (preg_match('/^(0\d{2})(\d{3,4})(\d{4})$/', $d, $m))     return "$m[1]-$m[2]-$m[3]";
   return '';
+}
+
+/* ── 변경 기록 ───────────────────────────────────── */
+const SFPC_LOG_NAME = ['create' => '신청', 'edit' => '수정', 'cancel' => '취소', 'restore' => '다시 접수',
+                       'admin' => '운영진 조정', 'coach' => '지도교사 정보'];
+function sfpc_log(?int $teamId, ?int $coachUserId, array $actor, string $action, string $detail): void {
+  $admin = is_admin($actor);
+  $name  = $admin ? (string)$actor['name'] : (string)(col("SELECT name FROM sfpc_coaches WHERE user_id = ?", [$actor['id']]) ?: $actor['name']);
+  db()->prepare("INSERT INTO sfpc_log(contest, team_id, coach_user_id, actor_user_id, actor_name, by_admin, action, detail, created_at)
+                 VALUES(?,?,?,?,?,?,?,?,?)")
+      ->execute([SFPC_CONTEST, $teamId, $coachUserId, $actor['id'], $name, $admin ? 1 : 0, $action, $detail, now()]);
+}
+/* 팀원 한 사람을 기록에 적는 꼴: "홍길동(2학년, L)" */
+function sfpc_member_text(array $m): string {
+  $x = array_filter([!empty($m['grade']) ? $m['grade'] . '학년' : '', (string)($m['shirt'] ?? '')], fn($v) => $v !== '');
+  return $m['name'] . ($x ? '(' . implode(', ', $x) . ')' : '');
+}
+/* 고치기 전과 뒤를 견주어 바뀐 것만 "항목: 전 → 뒤" 로 적는다. 바뀐 것이 없으면 '' */
+function sfpc_team_diff(array $old, array $oldMembers, array $new, array $newMembers): string {
+  $out = [];
+  $pair = function (string $label, string $a, string $b) use (&$out) { if ($a !== $b) $out[] = "$label: $a → $b"; };
+  $pair('지역', (string)$old['region'], (string)$new['region']);
+  $pair('참가 구분', SFPC_CATS[$old['category']]['label'] ?? (string)$old['category'], SFPC_CATS[$new['category']]['label'] ?? (string)$new['category']);
+  $pair('학교', (string)$old['school_name'], (string)$new['school_name']);
+  $pair('팀명', (string)$old['team_name'], (string)$new['team_name']);
+  $n = max(count($oldMembers), count($newMembers));
+  for ($i = 0; $i < $n; $i++) {
+    $a = isset($oldMembers[$i]) ? sfpc_member_text($oldMembers[$i]) : '';
+    $b = isset($newMembers[$i]) ? sfpc_member_text($newMembers[$i]) : '';
+    if ($a === $b) continue;
+    if ($a === '')      $out[] = '팀원 ' . ($i + 1) . ' 추가: ' . $b;
+    elseif ($b === '')  $out[] = '팀원 ' . ($i + 1) . ' 삭제: ' . $a;
+    else                $out[] = '팀원 ' . ($i + 1) . ': ' . $a . ' → ' . $b;
+  }
+  return implode("\n", $out);
 }
 
 /* ── 팀 ─────────────────────────────────────────── */
@@ -334,17 +386,28 @@ function sfpc_path(string $file): string {
 }
 
 /* ── 접수 기간의 첫 화면 ──────────────────────────
-   접수 전 · 접수 중에는 사이트 첫 화면(index.php) 대신 SFPC 안내(sfpc_landing.php)를 보여 준다.
-     · 로그인한 사람은 건너뛴다 (수업 · 평가를 보러 온 사람)
-     · "KAIT-CLASS 이동하기"(index.php?home=1)를 누른 사람은 그 뒤로 기존 첫 화면을 본다
-     · 접수가 끝나면 자동으로 기존 첫 화면으로 돌아간다 */
+   접수 전 · 접수 중에는 사이트 주소로 들어오면 첫 화면(index.php) 대신 SFPC 안내(sfpc_landing.php)가 뜬다.
+   로그인했든 아니든, 전에 "KAIT-CLASS 이동하기"를 눌렀든 아니든 마찬가지다 —
+   건너뛰는 규칙을 두었더니 "있던 화면이 왜 없지" 하고 헷갈렸다.
+
+   사이트 안에서 온 경우만 기존 첫 화면을 보여 준다 (위쪽 로고를 누름, 로그인한 뒤, 이동하기를 누름).
+   안에서 왔는지는 브라우저가 알려 주는 앞 화면 주소(Referer)로 본다. 그 값을 보내지 않는
+   브라우저에서는 로고를 눌러도 SFPC 안내가 뜨지만, 거기서 이동하기를 누르면 된다.
+   접수가 끝나면 자동으로 기존 첫 화면으로 돌아간다. */
 function sfpc_landing_active(): bool {
   return sfpc_setting('sfpc_menu_on') === '1' && sfpc_setting('sfpc_landing_on') === '1'
       && sfpc_apply_state() !== 'closed';
 }
+function sfpc_from_inside(): bool {
+  $ref  = (string)($_SERVER['HTTP_REFERER'] ?? '');
+  $host = (string)($_SERVER['HTTP_HOST'] ?? '');
+  if ($ref === '' || $host === '') return false;
+  $rh = (string)parse_url($ref, PHP_URL_HOST);
+  $rp = parse_url($ref, PHP_URL_PORT);
+  return strcasecmp($rh . ($rp ? ':' . $rp : ''), $host) === 0;
+}
 function sfpc_landing_gate(?array $u): void {
-  if (isset($_GET['home'])) $_SESSION['sfpc_home'] = 1;
-  if ($u || !empty($_SESSION['sfpc_home']) || !sfpc_landing_active()) return;
+  if (!sfpc_landing_active() || isset($_GET['home']) || sfpc_from_inside()) return;
   require __DIR__ . '/sfpc_landing.php';
   exit;
 }

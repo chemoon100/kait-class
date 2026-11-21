@@ -3,7 +3,9 @@
    admin/sfpc.php — 운영 > SFPC
 
      ?tab=summary   접수 현황 (지역 · 참가 구분별 집계, 현장 참가 인원과 상의 사이즈)
-     ?tab=teams     팀 목록 (찾기 · 참가 자격 · 반려 · 메모 · 내려받기)
+     ?tab=teams     팀 목록 (찾기 · 참가 자격 · 반려 · 메모 · 내려받기 · 신청 내용 고치기 · 팀별 변경 기록)
+     ?tab=coaches   지도교사 (정보 고치기 · 비밀번호 다시 정하기 · 계정 만들기 · 대신 팀 넣기)
+     ?tab=log       변경 기록 (누가 언제 무엇을 바꿨는지)
      ?tab=schools   학교 목록 (나이스에서 받기 · CSV 올리기)
      ?tab=settings  접수 기간 · 안내 문구 · 화면 공개
    ═══════════════════════════════════════════════ */
@@ -12,7 +14,9 @@ require_once __DIR__ . '/../guard.php';
 require_once __DIR__ . '/../layout.php';
 $me = need_admin('../');
 
-const SFPC_TABS = ['summary' => '접수 현황', 'teams' => '팀 목록', 'schools' => '학교 목록', 'settings' => '설정'];
+const SFPC_TABS = ['summary' => '접수 현황', 'teams' => '팀 목록', 'coaches' => '지도교사', 'log' => '변경 기록',
+                  'schools' => '학교 목록', 'settings' => '설정'];
+const SFPC_COACH_ID_RE = '/^[A-Za-z][A-Za-z0-9_.-]{3,19}$/';
 $tab = (string)($_GET['tab'] ?? 'summary');
 if (!isset(SFPC_TABS[$tab])) $tab = 'summary';
 
@@ -194,7 +198,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!isset(SFPC_TRACK_NAME[$track]) || !isset(SFPC_STATUS_NAME[$status])) redirect_with('', '값을 확인해 주세요.');
     db()->prepare("UPDATE sfpc_teams SET track = ?, status = ?, admin_memo = ?, updated_at = ? WHERE id = ?")
         ->execute([$track, $status, $memo, now(), $t['id']]);
+    $chg = [];
+    if ($t['track'] !== $track)   $chg[] = '참가 자격: ' . SFPC_TRACK_NAME[$t['track']] . ' → ' . SFPC_TRACK_NAME[$track];
+    if ($t['status'] !== $status) $chg[] = '상태: ' . SFPC_STATUS_NAME[$t['status']] . ' → ' . SFPC_STATUS_NAME[$status];
+    if ($t['admin_memo'] !== $memo) $chg[] = '메모: ' . ($t['admin_memo'] !== '' ? $t['admin_memo'] : '없음') . ' → ' . ($memo !== '' ? $memo : '없음');
+    if ($chg) sfpc_log((int)$t['id'], (int)$t['coach_user_id'], $me, 'admin', implode("\n", $chg));
     redirect_with(sfpc_team_no($t) . ' "' . $t['team_name'] . '" 팀을 고쳤습니다.');
+  }
+
+  /* 지도교사 정보 고치기 · 비밀번호 다시 정하기 */
+  if ($act === 'coach_save') {
+    $uid = (int)($_POST['uid'] ?? 0);
+    $c = one("SELECT c.*, u.login_id, u.role FROM sfpc_coaches c JOIN users u ON u.id = c.user_id WHERE c.user_id = ?", [$uid]);
+    if (!$c) redirect_with('', '지도교사를 찾지 못했습니다.');
+    $name  = sfpc_clean((string)($_POST['name'] ?? ''), 20);
+    $phone = sfpc_phone((string)($_POST['phone'] ?? ''));
+    $email = trim((string)($_POST['email'] ?? ''));
+    $pw    = (string)($_POST['pw'] ?? '');
+    if (ustrlen($name) < 2) redirect_with('', '이름을 입력하세요.');
+    if ($phone === '')      redirect_with('', '연락처를 확인해 주세요. 예: 010-1234-5678');
+    if ($email !== '' && (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 100)) redirect_with('', '이메일 주소를 확인해 주세요.');
+    if ($pw !== '' && strlen($pw) < 8) redirect_with('', '새 비밀번호는 8자 이상이어야 합니다.');
+    if ($pw !== '' && $c['role'] === 'admin') redirect_with('', '운영진 계정의 비밀번호는 여기서 바꾸지 않습니다.');
+    db()->prepare("UPDATE sfpc_coaches SET name = ?, phone = ?, email = ? WHERE user_id = ?")->execute([$name, $phone, $email, $uid]);
+    if ($pw !== '') db()->prepare("UPDATE users SET pw_hash = ? WHERE id = ?")->execute([password_hash($pw, PASSWORD_DEFAULT), $uid]);
+    $chg = [];
+    if ($c['name'] !== $name)   $chg[] = '이름: ' . $c['name'] . ' → ' . $name;
+    if ($c['phone'] !== $phone) $chg[] = '연락처: ' . $c['phone'] . ' → ' . $phone;
+    if ($c['email'] !== $email) $chg[] = '이메일: ' . ($c['email'] ?: '없음') . ' → ' . ($email ?: '없음');
+    if ($pw !== '')             $chg[] = '비밀번호를 다시 정함';
+    if ($chg) sfpc_log(null, $uid, $me, 'coach', implode("\n", $chg));
+    redirect_with($name . ' 선생님의 정보를 고쳤습니다.' . ($pw !== '' ? ' 새 비밀번호를 본인에게 알려 주세요.' : ''));
+  }
+
+  /* 지도교사 계정 만들기 — 마감 뒤 누락된 팀을 대신 넣어 줄 때, 계정이 없는 교사를 위해 */
+  if ($act === 'coach_new') {
+    $id    = trim((string)($_POST['id'] ?? ''));
+    $pw    = (string)($_POST['pw'] ?? '');
+    $name  = sfpc_clean((string)($_POST['name'] ?? ''), 20);
+    $phone = sfpc_phone((string)($_POST['phone'] ?? ''));
+    $email = trim((string)($_POST['email'] ?? ''));
+    if (!preg_match(SFPC_COACH_ID_RE, $id)) redirect_with('', '아이디는 영문으로 시작하는 4~20자여야 합니다.');
+    if (strlen($pw) < 8)    redirect_with('', '비밀번호는 8자 이상이어야 합니다.');
+    if (ustrlen($name) < 2) redirect_with('', '이름을 입력하세요.');
+    if ($phone === '')      redirect_with('', '연락처를 확인해 주세요. 예: 010-1234-5678');
+    if ($email !== '' && (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 100)) redirect_with('', '이메일 주소를 확인해 주세요.');
+    if (one("SELECT 1 FROM users WHERE login_id = ?", [$id])) redirect_with('', '이미 쓰이고 있는 아이디입니다.');
+    $uid = (int)tx(function (PDO $d) use ($id, $pw, $name, $phone, $email) {
+      $d->prepare("INSERT INTO users(login_id, pw_hash, name, role, group_id, source, approved, created_at)
+                   VALUES(?,?,?,'student',NULL,'sfpc',1,?)")->execute([$id, password_hash($pw, PASSWORD_DEFAULT), $name, now()]);
+      $uid = (int)$d->lastInsertId();
+      $d->prepare("INSERT INTO sfpc_coaches(user_id, name, phone, email, created_at) VALUES(?,?,?,?,?)")
+        ->execute([$uid, $name, $phone, $email, now()]);
+      return $uid;
+    });
+    sfpc_log(null, $uid, $me, 'coach', '운영진이 지도교사 계정을 만듦 (아이디 ' . $id . ')');
+    $_SESSION['flash'] = ['msg' => $name . ' 선생님의 계정을 만들었습니다. 아이디와 비밀번호를 본인에게 알려 주세요.', 'err' => ''];
+    header('Location: sfpc.php?tab=coaches&q=' . rawurlencode($id));
+    exit;
   }
 
   if ($act === 'settings') {
@@ -358,6 +419,10 @@ sfpc_css('../');
   [$f, $where, $args] = sfpc_admin_filter();
   $teams = sfpc_admin_teams($where, $args);
   $qs = http_build_query(array_filter(['tab' => 'teams'] + $f, fn($v) => $v !== ''));
+  $logs = [];
+  foreach (all("SELECT * FROM sfpc_log WHERE contest = ? AND team_id IS NOT NULL ORDER BY id DESC", [SFPC_CONTEST]) as $l) {
+    $logs[(int)$l['team_id']][] = $l;
+  }
 ?>
   <form class="searchbar" method="get">
     <input type="hidden" name="tab" value="teams">
@@ -417,10 +482,142 @@ sfpc_css('../');
                 <div class="field"><label>메모 <span class="hint">반려하면 지도교사에게 보입니다</span></label>
                   <input type="text" name="memo" maxlength="200" value="<?= h($t['admin_memo']) ?>"></div>
                 <div class="btnrow"><button class="btn sm primary" type="submit">저장</button>
-                  <a class="btn sm" href="../sfpc_team.php?id=<?= (int)$t['id'] ?>">신청 내용 고치기</a></div>
+                  <a class="btn sm" href="../sfpc_team.php?id=<?= (int)$t['id'] ?>">신청 내용 고치기</a>
+                  <a class="btn sm" href="?tab=coaches&q=<?= rawurlencode((string)$t['coach_login']) ?>">지도교사</a></div>
+                <?php $tl = $logs[(int)$t['id']] ?? []; if ($tl): ?>
+                  <div class="sfpc-hist">
+                    <b>변경 기록 <?= count($tl) ?>건</b>
+                    <?php foreach ($tl as $l): ?>
+                      <div class="h"><span class="when"><?= h(substr((string)$l['created_at'], 5, 11)) ?></span>
+                        <span class="who<?= (int)$l['by_admin'] ? ' adm' : '' ?>"><?= h($l['actor_name']) ?><?= (int)$l['by_admin'] ? ' (운영진)' : '' ?></span>
+                        <span class="act"><?= h(SFPC_LOG_NAME[$l['action']] ?? $l['action']) ?></span>
+                        <div class="d"><?= nl2br(h($l['detail'])) ?></div></div>
+                    <?php endforeach; ?>
+                  </div>
+                <?php endif; ?>
               </form>
             </details>
           </td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table></div>
+  <?php endif; ?>
+
+<?php elseif ($tab === 'coaches'):
+  /* ── 지도교사 ── */
+  $q = sfpc_clean((string)($_GET['q'] ?? ''), 30);
+  $where = '1'; $args = [SFPC_CONTEST];
+  if ($q !== '') {
+    $like = '%' . strtr($q, ['\\' => '\\\\', '%' => '\\%', '_' => '\\_']) . '%';
+    $where = "(c.name LIKE ? ESCAPE '\\' OR u.login_id LIKE ? ESCAPE '\\' OR c.phone LIKE ? ESCAPE '\\')";
+    array_push($args, $like, $like, $like);
+  }
+  $coaches = all("SELECT c.*, u.login_id, u.role,
+                    (SELECT COUNT(*) FROM sfpc_teams t WHERE t.coach_user_id = c.user_id AND t.contest = ? AND t.status = 'submitted') AS team_cnt
+                  FROM sfpc_coaches c JOIN users u ON u.id = c.user_id
+                  WHERE $where ORDER BY c.name, c.user_id", $args);
+?>
+  <form class="searchbar" method="get">
+    <input type="hidden" name="tab" value="coaches">
+    <input type="text" name="q" value="<?= h($q) ?>" placeholder="이름 · 아이디 · 연락처">
+    <button class="btn" type="submit">찾기</button>
+    <?php if ($q !== ''): ?><a class="btn" href="?tab=coaches">전체 보기</a><?php endif; ?>
+  </form>
+
+  <?php if (!$coaches): ?>
+    <div class="empty"><?= $q !== '' ? '찾는 지도교사가 없습니다.' : '아직 가입한 지도교사가 없습니다.' ?></div>
+  <?php else: ?>
+    <p class="small muted" style="margin:0 0 10px"><?= count($coaches) ?>명</p>
+    <div class="scrollx" style="border:0"><table class="list">
+      <thead><tr><th>이름</th><th>아이디</th><th>연락처</th><th>이메일</th><th>팀</th><th></th></tr></thead>
+      <tbody>
+      <?php foreach ($coaches as $c): ?>
+        <tr>
+          <td><b><?= h($c['name']) ?></b><?= $c['role'] === 'admin' ? ' <span class="sfpc-flag">운영진</span>' : '' ?></td>
+          <td class="num"><?= h($c['login_id']) ?></td>
+          <td><?= h($c['phone']) ?></td>
+          <td class="small"><?= h($c['email']) ?></td>
+          <td><?php if ((int)$c['team_cnt']): ?><a href="?tab=teams&q=<?= rawurlencode($c['name']) ?>"><?= (int)$c['team_cnt'] ?>팀</a><?php else: ?><span class="muted">없음</span><?php endif; ?></td>
+          <td class="right">
+            <details class="panel" style="margin:0; text-align:left; min-width:92px">
+              <summary style="padding:6px 11px; font-size:13px">관리</summary>
+              <div class="panel-b" style="min-width:250px">
+                <form method="post">
+                  <?= sfpc_csrf_field() ?><input type="hidden" name="act" value="coach_save"><input type="hidden" name="uid" value="<?= (int)$c['user_id'] ?>">
+                  <div class="field"><label>이름</label><input type="text" name="name" maxlength="20" value="<?= h($c['name']) ?>"></div>
+                  <div class="field"><label>연락처</label><input type="tel" name="phone" value="<?= h($c['phone']) ?>"></div>
+                  <div class="field"><label>이메일</label><input type="email" name="email" maxlength="100" value="<?= h($c['email']) ?>"></div>
+                  <?php if ($c['role'] !== 'admin'): ?>
+                    <div class="field"><label>새 비밀번호 <span class="hint">비밀번호를 잊었을 때만 · 8자 이상</span></label>
+                      <input type="text" name="pw" autocomplete="off" placeholder="바꾸지 않으려면 비워 둡니다"></div>
+                  <?php endif; ?>
+                  <button class="btn sm primary" type="submit">저장</button>
+                </form>
+                <p class="small muted" style="margin:14px 0 6px">이 선생님 이름으로 팀 넣기 — 접수 기간이 아니어도 됩니다</p>
+                <div class="btnrow">
+                  <a class="btn sm" href="../sfpc_team.php?kind=student&coach=<?= (int)$c['user_id'] ?>">학생 팀</a>
+                  <a class="btn sm" href="../sfpc_team.php?kind=teacher&coach=<?= (int)$c['user_id'] ?>">교사 · 예비교사 팀</a>
+                </div>
+              </div>
+            </details>
+          </td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table></div>
+  <?php endif; ?>
+
+  <div class="sec">
+    <h2>지도교사 계정 만들기</h2>
+    <p class="desc">스스로 가입하지 못한 선생님을 대신해 계정을 만듭니다. 만든 뒤 위 목록의 "관리"에서 그 선생님 이름으로 팀을 넣을 수 있습니다.
+      아이디와 비밀번호는 본인에게 따로 알려 주세요.</p>
+    <form method="post" class="sfpc-form" style="max-width:560px">
+      <?= sfpc_csrf_field() ?><input type="hidden" name="act" value="coach_new">
+      <div class="row">
+        <div class="field"><label for="cn-id">아이디</label><input type="text" id="cn-id" name="id" autocomplete="off" autocapitalize="off"><span class="hint">영문으로 시작하는 4~20자</span></div>
+        <div class="field"><label for="cn-pw">비밀번호</label><input type="text" id="cn-pw" name="pw" autocomplete="off"><span class="hint">8자 이상</span></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="cn-name">이름</label><input type="text" id="cn-name" name="name" maxlength="20"></div>
+        <div class="field"><label for="cn-phone">연락처</label><input type="tel" id="cn-phone" name="phone" placeholder="010-1234-5678"></div>
+      </div>
+      <div class="field"><label for="cn-email">이메일 <span class="hint" style="display:inline">선택</span></label><input type="email" id="cn-email" name="email" maxlength="100"></div>
+      <button class="btn primary" type="submit">계정 만들기</button>
+    </form>
+  </div>
+
+<?php elseif ($tab === 'log'):
+  /* ── 변경 기록 ── */
+  $only = (string)($_GET['by'] ?? '');
+  $w = "l.contest = ?"; $a = [SFPC_CONTEST];
+  if ($only === 'admin') $w .= " AND l.by_admin = 1";
+  $rows = all("SELECT l.*, t.team_name, t.school_name, t.id AS tid, c.name AS coach_name
+               FROM sfpc_log l
+               LEFT JOIN sfpc_teams t ON t.id = l.team_id
+               LEFT JOIN sfpc_coaches c ON c.user_id = l.coach_user_id
+               WHERE $w ORDER BY l.id DESC LIMIT 300", $a);
+?>
+  <div class="sfpc-subtabs" style="margin-bottom:14px">
+    <a class="<?= $only === '' ? 'on' : '' ?>" href="?tab=log">전체</a>
+    <a class="<?= $only === 'admin' ? 'on' : '' ?>" href="?tab=log&by=admin">운영진이 바꾼 것만</a>
+  </div>
+  <?php if (!$rows): ?>
+    <div class="empty">아직 기록이 없습니다.</div>
+  <?php else: ?>
+    <p class="small muted" style="margin:0 0 10px">최근 <?= count($rows) ?>건 · 신청, 수정, 취소, 운영진 조정이 모두 남습니다. 기록은 지워지지 않습니다.</p>
+    <div class="scrollx" style="border:0"><table class="list">
+      <thead><tr><th>언제</th><th>누가</th><th>무엇을</th><th>대상</th><th>바뀐 내용</th></tr></thead>
+      <tbody>
+      <?php foreach ($rows as $l): ?>
+        <tr>
+          <td class="num" style="white-space:nowrap"><?= h(substr((string)$l['created_at'], 0, 16)) ?></td>
+          <td style="white-space:nowrap"><?= h($l['actor_name']) ?><?= (int)$l['by_admin'] ? ' <span class="sfpc-flag">운영진</span>' : '' ?></td>
+          <td style="white-space:nowrap"><?= h(SFPC_LOG_NAME[$l['action']] ?? $l['action']) ?></td>
+          <td class="small"><?php if ($l['tid']): ?><a href="?tab=teams&status=all&q=<?= rawurlencode((string)$l['team_name']) ?>"><?= h((string)$l['team_name']) ?></a>
+              <div class="muted"><?= h((string)$l['school_name']) ?></div>
+            <?php else: ?>지도교사 <?= h((string)$l['coach_name']) ?><?php endif; ?></td>
+          <td class="small"><?= nl2br(h($l['detail'])) ?></td>
         </tr>
       <?php endforeach; ?>
       </tbody>

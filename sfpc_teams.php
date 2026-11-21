@@ -20,10 +20,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if (!$canEdit)                                         redirect_with('', '접수 기간이 아니어서 바꿀 수 없습니다.');
   if ($act === 'cancel' && $t['status'] === 'submitted') {
     db()->prepare("UPDATE sfpc_teams SET status = 'canceled', updated_at = ? WHERE id = ?")->execute([now(), $t['id']]);
+    sfpc_log((int)$t['id'], (int)$u['id'], $u, 'cancel', '지도교사가 신청을 취소');
     redirect_with('"' . $t['team_name'] . '" 팀 신청을 취소했습니다.');
   }
   if ($act === 'restore' && $t['status'] === 'canceled') {
     db()->prepare("UPDATE sfpc_teams SET status = 'submitted', updated_at = ? WHERE id = ?")->execute([now(), $t['id']]);
+    sfpc_log((int)$t['id'], (int)$u['id'], $u, 'restore', '지도교사가 다시 접수');
     redirect_with('"' . $t['team_name'] . '" 팀을 다시 접수했습니다.');
   }
   redirect_with('', '처리할 수 없는 요청입니다.');
