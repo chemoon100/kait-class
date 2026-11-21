@@ -168,6 +168,7 @@ function page_head(array $o): void {
   $root  = $o['root'] ?? '';
   $u     = $o['user'] ?? null;
   $nav   = $o['nav'] ?? '';
+  sfpc_char_gate($u, $root);   /* SFPC 팀 계정은 캐릭터를 만들기 전에는 다른 화면으로 가지 못한다 */
   $site  = site_name();
   $title = ($o['title'] ?? '') !== '' ? $o['title'] . ' · ' . $site : $site;
   $isAdmin  = ($u['role'] ?? '') === 'admin';

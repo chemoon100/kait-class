@@ -360,6 +360,15 @@ function sfpc_char_default(int $teamId): array {
   $out['f'] = 'none';
   return $out;
 }
+/* 팀 계정은 캐릭터를 만들 때까지 어느 화면을 열어도 꾸미기 화면으로 온다.
+   layout.php 의 page_head() 가 화면을 그리기 직전에 부른다. */
+function sfpc_char_gate(?array $u, string $root = ''): void {
+  if (!$u || ($u['source'] ?? '') !== SFPC_ACCOUNT_SOURCE) return;
+  if (basename((string)($_SERVER['SCRIPT_NAME'] ?? '')) === 'sfpc_char.php') return;
+  $t = sfpc_my_team($u);
+  if (!$t || $t['status'] !== 'submitted' || ($t['avatar'] ?? '') !== '') return;
+  header('Location: ' . $root . 'sfpc_char.php'); exit;
+}
 function sfpc_char_of(array $t): array {
   $c = ($t['avatar'] ?? '') !== '' ? sfpc_char_clean(json_decode((string)$t['avatar'], true)) : null;
   return $c ?? sfpc_char_default((int)$t['id']);
@@ -549,6 +558,7 @@ function sfpc_from_inside(): bool {
   return strcasecmp($rh . ($rp ? ':' . $rp : ''), $host) === 0;
 }
 function sfpc_landing_gate(?array $u): void {
+  sfpc_char_gate($u);   /* 캐릭터를 만들지 않은 팀 계정은 첫 화면보다 꾸미기가 먼저 */
   if (!sfpc_landing_active() || isset($_GET['home']) || sfpc_from_inside()) return;
   require __DIR__ . '/sfpc_landing.php';
   exit;

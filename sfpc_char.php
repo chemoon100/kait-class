@@ -19,16 +19,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if (!$c) redirect_with('', '고른 값을 확인하지 못했습니다. 다시 골라 주세요.');
   db()->prepare("UPDATE sfpc_teams SET avatar = ? WHERE id = ?")->execute([json_encode($c), $team['id']]);
   $_SESSION['flash'] = ['msg' => '캐릭터를 저장했습니다.', 'err' => ''];
-  header('Location: sfpc_char.php'); exit;
+  header('Location: ' . ($team['avatar'] === '' ? 'sfpc_me.php' : 'sfpc_char.php')); exit;   /* 처음 만든 것이면 우리 팀 화면으로 */
 }
 [$msg, $err] = flash_take();
+$first = $team['avatar'] === '';
 $cur = sfpc_char_of($team);
 
 page_head(['title' => '캐릭터 꾸미기', 'root' => '', 'user' => $u, 'nav' => 'sfpc']);
 sfpc_css();
 ?>
 <div class="wrap narrow">
-  <div class="phead"><h1>캐릭터 꾸미기</h1><span class="sub"><?= h($team['team_name']) ?> · <a href="sfpc_me.php">우리 팀으로</a></span></div>
+  <div class="phead"><h1>캐릭터 꾸미기</h1><span class="sub"><?= h($team['team_name']) ?><?php if ($team['avatar'] !== ''): ?> · <a href="sfpc_me.php">우리 팀으로</a><?php endif; ?></span></div>
+  <?php if ($team['avatar'] === '' && !$err): ?>
+    <div class="note info"><b><?= h($team['team_name']) ?></b> 팀, 반갑습니다. 먼저 우리 팀 캐릭터를 만들어 주세요. 대회 화면과 스코어보드에 이 캐릭터로 나옵니다. 저장하면 다음으로 넘어가고, 나중에 다시 바꿀 수 있습니다.</div>
+  <?php endif; ?>
   <?php if ($msg): ?><div class="note ok"><?= h($msg) ?></div><?php endif; ?>
   <?php if ($err): ?><div class="note err"><?= h($err) ?></div><?php endif; ?>
 
@@ -62,7 +66,7 @@ sfpc_css();
 <script src="<?= asset('sfpc_char.js', '') ?>"></script>
 <script>
 (function () {
-  var S = <?= json_encode($cur) ?>, saved = JSON.stringify(S);
+  var S = <?= json_encode($cur) ?>, saved = <?= $first ? "''" : 'JSON.stringify(S)' ?>;
   var c = document.getElementById('chStage'), g = c.getContext('2d'), val = document.getElementById('chVal');
   var rows = document.querySelectorAll('.sfpc-ch-row'), dirty = document.getElementById('chDirty');
   var P = 8, x = 120, dir = 1, tk = 0, puffs = [], still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -91,7 +95,7 @@ sfpc_css();
     });
     sync();
   });
-  window.addEventListener('beforeunload', function (e) { if (val.value !== saved && !window.__chSubmit) { e.preventDefault(); e.returnValue = ''; } });
+  window.addEventListener('beforeunload', function (e) { if (saved !== '' && val.value !== saved && !window.__chSubmit) { e.preventDefault(); e.returnValue = ''; } });
   document.getElementById('chForm').addEventListener('submit', function () { window.__chSubmit = true; });
 
   function frame() {

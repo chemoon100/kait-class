@@ -21,6 +21,7 @@ $members = sfpc_team_members((int)$team['id']);
 $coach   = one("SELECT name FROM sfpc_coaches WHERE user_id = ?", [$team['coach_user_id']]);
 $off     = $team['status'] !== 'submitted';
 $sched   = trim(sfpc_setting('sfpc_schedule'));
+[$msg, ] = $viewAs ? ['', ''] : flash_take();
 
 page_head(['title' => '우리 팀', 'root' => '', 'user' => $u, 'nav' => 'sfpc']);
 sfpc_css();
@@ -44,6 +45,7 @@ sfpc_css();
     </div>
   </div>
 
+  <?php if ($msg): ?><div class="note ok"><?= h($msg) ?></div><?php endif; ?>
   <?php if ($off): ?>
     <div class="note err">이 팀은 접수가 <?= h(SFPC_STATUS_NAME[$team['status']] ?? '취소') ?> 상태여서 대회에 참가할 수 없습니다. 지도 선생님께 확인해 주세요.</div>
   <?php else: ?>
