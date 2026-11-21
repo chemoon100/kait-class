@@ -10,6 +10,7 @@ require __DIR__ . '/guard.php';
 require __DIR__ . '/layout.php';
 $u     = me();
 $coach = sfpc_coach($u);
+$myTeam = sfpc_preview() === null ? sfpc_my_team($u) : null;   /* 팀 계정으로 들어온 경우 — 신청 버튼 대신 우리 팀으로 가는 길을 보여 준다 */
 $state = sfpc_apply_state();
 $canApply = sfpc_can_edit($u);
 $mine  = $coach ? array_filter(sfpc_teams_of((int)$u['id']), fn($t) => $t['status'] !== 'canceled') : [];
@@ -58,6 +59,24 @@ sfpc_preview_bar();
     </div>
   <?php endif; ?>
 
+  <?php if ($myTeam): ?>
+  <h2 class="sfpc-pick-h"><?= h($myTeam['team_name']) ?> 팀으로 들어와 있습니다 <span>팀 계정 <?= h(sfpc_account_id($myTeam)) ?></span></h2>
+  <div class="sfpc-pick">
+    <a href="sfpc_me.php" class="k-student">
+      <span class="who">우리 팀</span>
+      <span class="t">우리 팀 화면</span>
+      <span class="d">팀원과 대회 일정을 보고, 대회 참가 화면과 스코어보드로 갑니다.</span>
+      <span class="go">우리 팀으로 가기 →</span>
+    </a>
+    <a href="sfpc_char.php" class="k-teacher">
+      <span class="who">캐릭터</span>
+      <span class="t">캐릭터 꾸미기</span>
+      <span class="d">대회 화면과 스코어보드에 나올 우리 팀 캐릭터를 만듭니다.</span>
+      <span class="go">캐릭터 꾸미러 가기 →</span>
+    </a>
+  </div>
+  <p class="small muted" style="margin:0 0 30px">팀원이나 팀 이름을 바꾸려면 지도 선생님께 말씀드리세요.</p>
+  <?php else: ?>
   <h2 class="sfpc-pick-h"><?= $canApply ? '어떤 팀으로 신청하시나요?' : ($state === 'before' ? '참가 신청은 접수 기간에 열립니다' : '참가 접수가 마감되었습니다') ?>
     <?php if ($canApply): ?><span>아래에서 하나를 눌러 신청을 시작하세요</span><?php endif; ?></h2>
   <div class="sfpc-pick">
@@ -78,6 +97,7 @@ sfpc_preview_bar();
     <?php if (!$u): ?>이미 신청하셨나요? <a href="login.php?next=<?= rawurlencode(sfpc_path('sfpc_teams.php')) ?>">로그인해서 내 팀 보기</a> · <?php endif; ?>
     한 선생님이 여러 팀을 신청할 수 있고, 접수 기간에는 언제든 고칠 수 있습니다.
   </p>
+  <?php endif; ?>
 
   <div class="sec" style="margin-top:0">
     <h2>어떤 대회인가요</h2>
