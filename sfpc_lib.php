@@ -14,7 +14,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib.php';
 
 /* 표 구조를 바꿀 때마다 1씩 올린다 */
-const SFPC_SCHEMA = 3;
+const SFPC_SCHEMA = 4;
 
 /* 올해 대회. 내년에는 이 값과 설정만 바꾸면 접수를 새로 받을 수 있다. */
 const SFPC_CONTEST = '2026';
@@ -64,6 +64,7 @@ const SFPC_DEFAULTS = [
   'sfpc_contact'      => 'kaiteachers2013@gmail.com',
   'sfpc_menu_on'      => '1',                    // 위쪽 메뉴에 SFPC 보이기
   'sfpc_landing_on'   => '1',                    // 접수 전 · 접수 중에 첫 화면을 SFPC 안내로 (sfpc_landing.php)
+  'sfpc_account_open' => '0',                    // 지도교사의 "내 팀" 화면에 팀 계정 보이기 (계정을 나눠 주는 날 켠다)
   'sfpc_contest_open' => '0',                    // 대회 참가 화면 공개
   'sfpc_board_open'   => '0',                    // 스코어보드 공개
   'sfpc_neis_key'     => '',                     // 나이스 교육정보 개방 포털 인증키
@@ -180,6 +181,10 @@ if ((int)sfpc_setting('sfpc_schema') !== SFPC_SCHEMA) {
   /* 2 — 광주 · 전남이 전남광주로 합쳐졌다. 먼저 받아 둔 팀과 학교의 지역 이름을 맞춘다. */
   db()->exec("UPDATE sfpc_teams   SET region = '전남광주' WHERE region IN ('광주', '전남')");
   db()->exec("UPDATE sfpc_schools SET region = '전남광주' WHERE region IN ('광주', '전남')");
+  /* 4 — 팀 계정의 비밀번호를 마지막으로 정한 때. 비어 있으면 아직 비밀번호가 없다(로그인할 수 없다). */
+  if (!in_array('account_pw_at', array_column(db()->query("PRAGMA table_info(sfpc_teams)")->fetchAll(PDO::FETCH_ASSOC), 'name'), true)) {
+    db()->exec("ALTER TABLE sfpc_teams ADD COLUMN account_pw_at TEXT NOT NULL DEFAULT ''");
+  }
   /* 학교 목록이 비어 있으면 함께 넣어 둔 목록으로 채운다 — 설치만 하면 학교 찾기가 바로 된다 */
   if ((int)db()->query("SELECT COUNT(*) FROM sfpc_schools")->fetchColumn() === 0 && sfpc_schools_load_bundled() > 0) {
     setting_set('sfpc_schools_at', now());
@@ -246,9 +251,73 @@ function sfpc_phone(string $s): string {
   return '';
 }
 
+/* ── 팀 계정 ──────────────────────────────────────
+   팀마다 대회용 계정이 하나 있다. 팀원이 이 계정으로 함께 로그인해 문제를 푼다.
+   · 아이디는 접수 번호에서 정해진다 (sfpc260001). 비밀번호를 정하기 전에도 미리 알려 줄 수 있다.
+   · 계정(users 행)은 비밀번호를 처음 정할 때 만든다. 그 전에는 로그인할 것이 없다.
+   · 비밀번호는 암호화한 값만 저장한다. 그래서 "조회"는 없고, 새로 정하는 것만 된다.
+   · 취소 · 반려된 팀의 계정은 로그인이 막힌다 (users.approved = 0).
+   지도교사에게 이 기능이 보이는 때는 설정 sfpc_account_open 으로 정한다. */
+const SFPC_ACCOUNT_SOURCE = 'sfpc_team';
+const SFPC_PW_MIN = 6;
+function sfpc_account_id(array $t): string {
+  return 'sfpc' . substr((string)$t['contest'], -2) . str_pad((string)$t['id'], 4, '0', STR_PAD_LEFT);
+}
+function sfpc_account_open(): bool { return sfpc_setting('sfpc_account_open') === '1'; }
+/* 읽어 주기 쉬운 무작위 비밀번호 — 헷갈리는 글자(0 o 1 l i)는 뺀다 */
+function sfpc_random_pw(int $len = 8): string {
+  $abc = 'abcdefghjkmnpqrstuvwxyz23456789'; $out = '';
+  for ($i = 0; $i < $len; $i++) $out .= $abc[random_int(0, strlen($abc) - 1)];
+  return $out;
+}
+/* 팀 계정의 비밀번호를 정한다. 계정이 없으면 만든다. 오류 문구를 돌려준다 ('' 이면 성공). */
+function sfpc_account_set_pw(array $t, string $pw, array $actor): string {
+  if (strlen($pw) < SFPC_PW_MIN) return '비밀번호는 ' . SFPC_PW_MIN . '자 이상으로 정해 주세요.';
+  if (strlen($pw) > 72)          return '비밀번호가 너무 깁니다.';
+  $login = sfpc_account_id($t);
+  $hash  = password_hash($pw, PASSWORD_DEFAULT);
+  $ok    = $t['status'] === 'submitted' ? 1 : 0;
+  try {
+    tx(function (PDO $d) use ($t, $login, $hash, $ok) {
+      $uid = (int)($t['account_user_id'] ?? 0);
+      if ($uid && !$d->query("SELECT 1 FROM users WHERE id = $uid")->fetchColumn()) $uid = 0;
+      if (!$uid) {
+        $d->prepare("INSERT INTO users(login_id, pw_hash, name, role, group_id, source, approved, created_at)
+                     VALUES(?,?,?,'student',NULL,?,?,?)")
+          ->execute([$login, $hash, $t['team_name'], SFPC_ACCOUNT_SOURCE, $ok, now()]);
+        $uid = (int)$d->lastInsertId();
+      } else {
+        $d->prepare("UPDATE users SET pw_hash = ?, name = ?, approved = ? WHERE id = ?")->execute([$hash, $t['team_name'], $ok, $uid]);
+      }
+      $d->prepare("UPDATE sfpc_teams SET account_user_id = ?, account_pw_at = ? WHERE id = ?")->execute([$uid, now(), $t['id']]);
+    });
+  } catch (Throwable $e) {
+    return '계정을 만들지 못했습니다. 운영진에게 알려 주세요. (' . $login . ')';
+  }
+  sfpc_log((int)$t['id'], (int)$t['coach_user_id'], $actor, 'account',
+           ($t['account_pw_at'] ?? '') === '' ? '팀 계정 ' . $login . ' 의 비밀번호를 처음 정함' : '팀 계정 ' . $login . ' 의 비밀번호를 바꿈');
+  return '';
+}
+/* 팀 이름 · 상태가 바뀌면 계정에도 맞춘다. 팀을 저장하는 곳마다 부른다. */
+function sfpc_account_sync(int $teamId): void {
+  $t = sfpc_team($teamId);
+  if (!$t || !(int)$t['account_user_id']) return;
+  db()->prepare("UPDATE users SET name = ?, approved = ? WHERE id = ? AND source = ?")
+      ->execute([$t['team_name'], $t['status'] === 'submitted' ? 1 : 0, $t['account_user_id'], SFPC_ACCOUNT_SOURCE]);
+}
+/* 로그인한 사람이 팀 계정이면 그 팀, 아니면 null */
+function sfpc_my_team(?array $u): ?array {
+  if (!$u || ($u['source'] ?? '') !== SFPC_ACCOUNT_SOURCE) return null;
+  return one("SELECT * FROM sfpc_teams WHERE account_user_id = ? AND contest = ?", [$u['id'], SFPC_CONTEST]);
+}
+/* 팀 계정으로는 접수 화면(신청 · 내 팀 · 지도교사 가입)을 쓰지 않는다 — 팀 화면으로 보낸다 */
+function sfpc_coach_only(?array $u): void {
+  if ($u && ($u['source'] ?? '') === SFPC_ACCOUNT_SOURCE) { header('Location: ' . sfpc_path('sfpc_me.php')); exit; }
+}
+
 /* ── 변경 기록 ───────────────────────────────────── */
 const SFPC_LOG_NAME = ['create' => '신청', 'edit' => '수정', 'cancel' => '취소', 'restore' => '다시 접수',
-                       'admin' => '운영진 조정', 'coach' => '지도교사 정보'];
+                       'admin' => '운영진 조정', 'coach' => '지도교사 정보', 'account' => '팀 계정'];
 function sfpc_log(?int $teamId, ?int $coachUserId, array $actor, string $action, string $detail): void {
   $admin = is_admin($actor);
   $name  = $admin ? (string)$actor['name'] : (string)(col("SELECT name FROM sfpc_coaches WHERE user_id = ?", [$actor['id']]) ?: $actor['name']);

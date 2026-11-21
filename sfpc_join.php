@@ -14,6 +14,7 @@ declare(strict_types=1);
 require __DIR__ . '/guard.php';
 require __DIR__ . '/layout.php';
 $u     = me();
+sfpc_coach_only($u);
 $coach = sfpc_coach($u);
 
 $next = (string)($_GET['next'] ?? $_POST['next'] ?? '');

@@ -174,3 +174,43 @@ table.sfpc-pvlinks th{text-align:left; font-size:13.5px; font-weight:700; color:
 table.sfpc-pvlinks td{padding:5px 0; font-size:13.5px}
 table.sfpc-pvlinks td a{display:inline-block; margin-right:6px; padding:4px 12px; border:1px solid var(--b200); border-radius:20px; font-weight:600}
 table.sfpc-pvlinks td a:hover{text-decoration:none; background:var(--b50)}
+
+/* ── 팀 계정 (내 팀 · 운영 화면) ───────────────── */
+.sfpc-acc{margin-top:12px; padding:11px 13px; border:1px dashed var(--b200); border-radius:10px; background:var(--b25)}
+.sfpc-acc-h{display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:14px}
+.sfpc-acc .lab{font-weight:700; color:var(--b800)}
+.sfpc-acc code.id{font-family:var(--mono); font-size:15px; font-weight:700; padding:2px 9px; border-radius:6px; background:#fff; border:1px solid var(--line); color:var(--b900); user-select:all}
+.sfpc-acc .st{font-size:13px}
+.sfpc-acc .st.ok{color:#1F7A4D}
+.sfpc-acc .st.no{color:#B45309}
+.sfpc-acc details{margin-top:8px}
+.sfpc-acc summary{cursor:pointer; font-size:13.5px; color:var(--b700); font-weight:600}
+.sfpc-acc-f{display:flex !important; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px}
+.sfpc-acc-f input{width:190px; max-width:100%}
+.sfpc-acc-f .or{font-size:13px; color:var(--ink-3)}
+.sfpc-acc .hint{margin:8px 0 0; font-size:12.5px; color:var(--ink-3)}
+
+/* ── 우리 팀 (팀 계정의 첫 화면) ───────────────── */
+.sfpc-me-h{display:flex; justify-content:space-between; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:6px 0 18px; padding:20px 22px; border-radius:14px; background:#140A24; color:#fff}
+.sfpc-me-h .tag{margin:0 0 4px; font-size:12.5px; letter-spacing:.08em; color:#5DCAA5; font-weight:700}
+.sfpc-me-h h1{margin:0; font-size:28px; letter-spacing:-.02em; color:#fff}
+.sfpc-me-h .sub{margin:6px 0 0; font-size:14px; color:#C9C3E6}
+.sfpc-me-h .ids{display:flex; flex-direction:column; gap:4px; font-size:13px; color:#C9C3E6; text-align:right}
+.sfpc-me-h .ids code{font-family:var(--mono); color:#fff; margin-left:6px}
+.sfpc-me-grid{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+.sfpc-me-card{border:1px solid var(--line); border-radius:12px; padding:16px 18px; background:#fff}
+.sfpc-me-card h2{margin:0 0 10px; font-size:16px; color:var(--b900)}
+.sfpc-me-card p{margin:0; font-size:14px; color:var(--ink-2)}
+.sfpc-me-card .mem{margin:0; padding:0; list-style:none; font-size:15px}
+.sfpc-me-card .mem li{padding:5px 0; border-bottom:1px solid var(--line)}
+.sfpc-me-card .mem li:last-child{border-bottom:0}
+.sfpc-me-card.char .ph{height:96px; border-radius:10px; background:var(--b25); border:1px dashed var(--b200); display:flex; align-items:center; justify-content:center; margin-bottom:10px}
+.sfpc-me-card.char .ph span{width:40px; height:40px; background:var(--b200); border-radius:8px}
+.sfpc-me-card .soon{display:inline-block; margin-top:10px; font-size:12.5px; font-weight:700; padding:2px 9px; border-radius:20px; background:var(--b100); color:var(--b700)}
+.sfpc-me-links{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:14px}
+.sfpc-me-links a{display:flex; flex-direction:column; gap:3px; padding:14px 18px; border:1px solid var(--line); border-radius:12px; background:#fff; text-decoration:none; color:var(--ink)}
+.sfpc-me-links a:hover{border-color:var(--b400)}
+.sfpc-me-links a b{font-size:15.5px; color:var(--b900)}
+.sfpc-me-links a span{font-size:13px; color:var(--ink-3)}
+@media (max-width:640px){ .sfpc-me-grid, .sfpc-me-links{grid-template-columns:1fr} .sfpc-me-h .ids{text-align:left} }
+.sfpc-me-h .tag{background:none; padding:0; border:0}

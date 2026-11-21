@@ -16,6 +16,7 @@ declare(strict_types=1);
 require __DIR__ . '/guard.php';
 require __DIR__ . '/layout.php';
 $u = need_login();
+sfpc_coach_only($u);
 $coach = sfpc_coach($u);
 
 $id   = (int)($_GET['id'] ?? $_POST['id'] ?? 0);
@@ -167,6 +168,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($team) {
       $diff = sfpc_team_diff($team, $oldMembers, $in, $newMembers);
       if ($diff !== '') sfpc_log((int)$team['id'], $ownerId, $u, 'edit', $diff);
+      sfpc_account_sync((int)$team['id']);   /* 팀 이름이 바뀌면 계정에 보이는 이름도 */
     } else {
       sfpc_log((int)$newId, $ownerId, $u, 'create',
         ($byAdmin ? "운영진이 대신 접수\n" : '') . $in['region'] . ' · ' . $cat['label'] . ' · ' . $in['school_name'] . ' · ' . $in['team_name']

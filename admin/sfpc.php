@@ -98,11 +98,11 @@ if (isset($_GET['export'])) {
     $rows[] = [sfpc_team_no($t), SFPC_STATUS_NAME[$t['status']] ?? '', $t['region'], SFPC_CATS[$t['category']]['label'] ?? '',
                SFPC_TRACK_NAME[$t['track']] ?? '', $way($t), $t['school_name'], (int)$t['school_manual'] ? '직접 입력' : '',
                $t['team_name'], count($t['members']), $names, $t['coach_name'], $t['coach_phone'], $t['coach_email'],
-               $t['coach_login'], $t['created_at'], $t['updated_at'], $t['admin_memo']];
+               $t['coach_login'], sfpc_account_id($t), ($t['account_pw_at'] ?? '') !== '' ? '정함' : '', $t['created_at'], $t['updated_at'], $t['admin_memo']];
   }
   sfpc_csv_out("sfpc-teams-$stamp.csv",
     ['접수번호','상태','지역','참가구분','참가자격','참가방식','학교','학교확인','팀명','인원','팀원','지도교사','연락처','이메일',
-     '지도교사아이디','접수일시','수정일시','메모'], $rows);
+     '지도교사아이디','팀계정','팀비밀번호','접수일시','수정일시','메모'], $rows);
 }
 
 /* ── 학교 목록 받기 ───────────────────────────── */
@@ -208,7 +208,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($t['status'] !== $status) $chg[] = '상태: ' . SFPC_STATUS_NAME[$t['status']] . ' → ' . SFPC_STATUS_NAME[$status];
     if ($t['admin_memo'] !== $memo) $chg[] = '메모: ' . ($t['admin_memo'] !== '' ? $t['admin_memo'] : '없음') . ' → ' . ($memo !== '' ? $memo : '없음');
     if ($chg) sfpc_log((int)$t['id'], (int)$t['coach_user_id'], $me, 'admin', implode("\n", $chg));
+    sfpc_account_sync((int)$t['id']);   /* 취소 · 반려하면 팀 계정 로그인도 막힌다 */
     redirect_with(sfpc_team_no($t) . ' "' . $t['team_name'] . '" 팀을 고쳤습니다.');
+  }
+
+  /* 팀 계정 비밀번호를 무작위로 새로 만든다 — 지도교사와 연락이 안 될 때 운영진이 대신 */
+  if ($act === 'team_pw') {
+    $t = sfpc_team((int)($_POST['id'] ?? 0));
+    if (!$t) redirect_with('', '팀을 찾지 못했습니다.');
+    if ($t['status'] !== 'submitted') redirect_with('', '접수 완료 상태인 팀만 계정을 쓸 수 있습니다.');
+    $pw = sfpc_random_pw();
+    $e = sfpc_account_set_pw($t, $pw, $me);
+    if ($e !== '') redirect_with('', $e);
+    redirect_with(sfpc_team_no($t) . ' "' . $t['team_name'] . '" 팀 계정 ' . sfpc_account_id($t) . ' 의 새 비밀번호는  ' . $pw . '  입니다. 지금 적어 두세요 — 다시 볼 수 없습니다.');
   }
 
   /* 지도교사 정보 고치기 · 비밀번호 다시 정하기 */
@@ -279,7 +291,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     setting_set('sfpc_schedule', trim((string)($_POST['schedule'] ?? '')));
     setting_set('sfpc_privacy', trim((string)($_POST['privacy'] ?? '')));
     setting_set('sfpc_contact', sfpc_clean((string)($_POST['contact'] ?? ''), 100));
-    foreach (['menu_on', 'landing_on', 'contest_open', 'board_open'] as $k) setting_set('sfpc_' . $k, !empty($_POST[$k]) ? '1' : '0');
+    foreach (['menu_on', 'landing_on', 'account_open', 'contest_open', 'board_open'] as $k) setting_set('sfpc_' . $k, !empty($_POST[$k]) ? '1' : '0');
     redirect_with('설정을 저장했습니다.');
   }
 
@@ -489,6 +501,16 @@ sfpc_css('../');
                 <div class="btnrow"><button class="btn sm primary" type="submit">저장</button>
                   <a class="btn sm" href="../sfpc_team.php?id=<?= (int)$t['id'] ?>">신청 내용 고치기</a>
                   <a class="btn sm" href="?tab=coaches&q=<?= rawurlencode((string)$t['coach_login']) ?>">지도교사</a></div>
+                <div class="sfpc-acc" style="margin-top:12px">
+                  <div class="sfpc-acc-h"><span class="lab">팀 계정</span> <code class="id"><?= h(sfpc_account_id($t)) ?></code>
+                    <?php if (($t['account_pw_at'] ?? '') !== ''): ?><span class="st ok">비밀번호 정함 · <?= h(substr((string)$t['account_pw_at'], 5, 11)) ?></span>
+                    <?php else: ?><span class="st no">비밀번호 없음</span><?php endif; ?></div>
+                  <a class="btn sm" href="../sfpc_me.php?team=<?= (int)$t['id'] ?>" target="_blank" rel="noopener" style="margin-top:8px">팀 화면 보기</a>
+                  <?php if ($t['status'] === 'submitted'): ?>
+                    <button class="btn sm" name="act" value="team_pw" style="margin-top:8px"
+                            onclick="return confirm('이 팀 계정의 비밀번호를 무작위로 새로 만들까요?\n지금 쓰는 비밀번호는 더 쓸 수 없게 됩니다.')">비밀번호 새로 만들기</button>
+                  <?php endif; ?>
+                </div>
                 <?php $tl = $logs[(int)$t['id']] ?? []; if ($tl): ?>
                   <div class="sfpc-hist">
                     <b>변경 기록 <?= count($tl) ?>건</b>
@@ -720,6 +742,8 @@ sfpc_css('../');
         위쪽 메뉴와 첫 화면에 SFPC 보이기</label>
       <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="landing_on" value="1"<?= sfpc_setting('sfpc_landing_on') === '1' ? ' checked' : '' ?>>
         접수 전 · 접수 중에는 사이트 첫 화면을 SFPC 안내로 바꾸기 <a href="../sfpc_landing.php" target="_blank" rel="noopener" style="margin-left:6px">미리 보기</a></label>
+      <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="account_open" value="1"<?= sfpc_setting('sfpc_account_open') === '1' ? ' checked' : '' ?>>
+        팀 계정 나눠 주기 <span class="muted">— 켜면 지도교사의 "내 팀" 화면에 팀 아이디가 보이고, 비밀번호를 정할 수 있습니다</span></label>
       <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="contest_open" value="1"<?= sfpc_setting('sfpc_contest_open') === '1' ? ' checked' : '' ?>>
         대회 참가 화면 공개</label>
       <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="board_open" value="1"<?= sfpc_setting('sfpc_board_open') === '1' ? ' checked' : '' ?>>

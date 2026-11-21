@@ -9,6 +9,7 @@ declare(strict_types=1);
 require __DIR__ . '/guard.php';
 require __DIR__ . '/layout.php';
 $u = need_login();
+sfpc_coach_only($u);
 /* 운영진이 다른 지도교사의 화면을 보는 경우 */
 $viewAs = is_admin($u) ? (int)($_GET['coach'] ?? 0) : 0;
 if ($viewAs) {
@@ -30,15 +31,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$viewAs) {
   $act = (string)($_POST['act'] ?? '');
   if (!sfpc_csrf_ok())                                   redirect_with('', '화면을 연 지 오래되었습니다. 다시 시도해 주세요.');
   if (!$t || (int)$t['coach_user_id'] !== (int)$u['id']) redirect_with('', '팀을 찾지 못했습니다.');
+  /* 팀 계정 비밀번호 — 접수 기간과 상관없이, 운영진이 계정을 공개한 뒤에 쓸 수 있다 */
+  if ($act === 'pw' || $act === 'pw_random') {
+    if (!sfpc_account_open())        redirect_with('', '아직 팀 계정을 나눠 드리기 전입니다.');
+    if ($t['status'] !== 'submitted') redirect_with('', '접수가 취소된 팀은 계정을 쓸 수 없습니다.');
+    $pw = $act === 'pw_random' ? sfpc_random_pw() : (string)($_POST['pw'] ?? '');
+    if ($act === 'pw' && $pw !== (string)($_POST['pw2'] ?? '')) redirect_with('', '비밀번호를 두 번 똑같이 입력해 주세요.');
+    $e = sfpc_account_set_pw($t, $pw, $u);
+    if ($e !== '') redirect_with('', $e);
+    redirect_with($act === 'pw_random'
+      ? '"' . $t['team_name'] . '" 팀 계정 ' . sfpc_account_id($t) . ' 의 새 비밀번호는  ' . $pw . '  입니다. 지금 적어 두세요 — 이 화면을 벗어나면 다시 볼 수 없습니다.'
+      : '"' . $t['team_name'] . '" 팀 계정 ' . sfpc_account_id($t) . ' 의 비밀번호를 정했습니다.');
+  }
   if (!$canEdit)                                         redirect_with('', '접수 기간이 아니어서 바꿀 수 없습니다.');
   if ($act === 'cancel' && $t['status'] === 'submitted') {
     db()->prepare("UPDATE sfpc_teams SET status = 'canceled', updated_at = ? WHERE id = ?")->execute([now(), $t['id']]);
     sfpc_log((int)$t['id'], (int)$u['id'], $u, 'cancel', '지도교사가 신청을 취소');
+    sfpc_account_sync((int)$t['id']);
     redirect_with('"' . $t['team_name'] . '" 팀 신청을 취소했습니다.');
   }
   if ($act === 'restore' && $t['status'] === 'canceled') {
     db()->prepare("UPDATE sfpc_teams SET status = 'submitted', updated_at = ? WHERE id = ?")->execute([now(), $t['id']]);
     sfpc_log((int)$t['id'], (int)$u['id'], $u, 'restore', '지도교사가 다시 접수');
+    sfpc_account_sync((int)$t['id']);
     redirect_with('"' . $t['team_name'] . '" 팀을 다시 접수했습니다.');
   }
   redirect_with('', '처리할 수 없는 요청입니다.');
@@ -47,6 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$viewAs) {
 [$msg, $err] = flash_take();
 $teams = sfpc_teams_of($ownerId);
 $state = sfpc_apply_state();
+$accOpen = sfpc_account_open();
 
 page_head(['title' => '내 팀', 'root' => '', 'user' => $u, 'nav' => 'sfpc']);
 sfpc_css();
@@ -69,6 +85,11 @@ sfpc_css();
     <div class="note info">접수가 마감되어 내용을 고칠 수 없습니다. 바꿔야 할 것이 있으면 운영진에게 문의해 주세요.</div>
   <?php elseif ($state === 'before'): ?>
     <div class="note info">아직 접수 기간이 아닙니다.</div>
+  <?php endif; ?>
+
+  <?php if ($accOpen && $teams): ?>
+    <div class="note info">팀 계정이 준비되었습니다. 팀마다 아래 "팀 계정"에서 비밀번호를 정한 뒤, 아이디와 비밀번호를 팀원에게 알려 주세요.
+      팀원은 <a href="login.php">로그인</a> 화면에서 그 계정으로 들어옵니다.</div>
   <?php endif; ?>
 
   <div class="sfpc-ro">
@@ -114,6 +135,31 @@ sfpc_css();
       </p>
       <?php if ($t['status'] === 'rejected' && $t['admin_memo'] !== ''): ?>
         <p class="meta bad-text">반려 사유: <?= h($t['admin_memo']) ?></p>
+      <?php endif; ?>
+      <?php if ($accOpen && $t['status'] === 'submitted'): $hasPw = ($t['account_pw_at'] ?? '') !== ''; ?>
+        <div class="sfpc-acc">
+          <div class="sfpc-acc-h">
+            <span class="lab">팀 계정</span>
+            <code class="id"><?= h(sfpc_account_id($t)) ?></code>
+            <?php if ($hasPw): ?><span class="st ok">비밀번호 정함 · <?= h(substr((string)$t['account_pw_at'], 5, 11)) ?></span>
+            <?php else: ?><span class="st no">비밀번호를 아직 정하지 않았습니다</span><?php endif; ?>
+          </div>
+          <?php if (!$viewAs): ?>
+          <details<?= $hasPw ? '' : ' open' ?>>
+            <summary><?= $hasPw ? '비밀번호 바꾸기' : '비밀번호 정하기' ?></summary>
+            <form method="post" class="sfpc-acc-f" autocomplete="off">
+              <?= sfpc_csrf_field() ?><input type="hidden" name="id" value="<?= (int)$t['id'] ?>">
+              <input type="password" name="pw" placeholder="새 비밀번호 (<?= SFPC_PW_MIN ?>자 이상)" minlength="<?= SFPC_PW_MIN ?>" maxlength="72" autocomplete="new-password" aria-label="새 비밀번호">
+              <input type="password" name="pw2" placeholder="한 번 더" maxlength="72" autocomplete="new-password" aria-label="새 비밀번호 확인">
+              <button class="btn sm primary" name="act" value="pw">이 비밀번호로 정하기</button>
+              <span class="or">또는</span>
+              <button class="btn sm" name="act" value="pw_random" formnovalidate
+                      onclick="return confirm('무작위 비밀번호를 새로 만들까요?<?= $hasPw ? '\n지금 쓰는 비밀번호는 더 쓸 수 없게 됩니다.' : '' ?>')">무작위로 만들기</button>
+            </form>
+            <p class="hint">팀원들이 이 아이디와 비밀번호로 함께 로그인합니다. 비밀번호는 저장된 것을 다시 볼 수 없으니, 잊으면 새로 정해 주세요.</p>
+          </details>
+          <?php endif; ?>
+        </div>
       <?php endif; ?>
     </div>
   <?php endforeach; endif; ?>
