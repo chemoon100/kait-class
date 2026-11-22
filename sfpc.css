@@ -226,3 +226,8 @@ table.sfpc-pvlinks td a:hover{text-decoration:none; background:var(--b50)}
 .sfpc-ch-row button.sw{width:30px; height:30px; padding:0; border-radius:50%; border:1px solid rgba(0,0,0,.15)}
 .sfpc-ch-row button.sw.on{box-shadow:0 0 0 2px #fff, 0 0 0 4px var(--b700)}
 .sfpc-me-card.char canvas.stage{display:block; width:100%; height:auto; border-radius:10px; background:#140A24; image-rendering:pixelated; margin-bottom:10px}
+.sfpc-pwonce{margin-top:10px; padding:12px 14px; border-radius:10px; background:#FFF7E0; border:2px solid #E0A800; display:flex; flex-wrap:wrap; align-items:center; gap:10px}
+.sfpc-pwonce .cap{font-weight:700; color:#7A5200; font-size:14px}
+.sfpc-pwonce code{font-family:var(--mono); font-size:24px; font-weight:700; letter-spacing:.08em; padding:4px 14px; border-radius:8px; background:#fff; border:1px solid #E0A800; color:#1F2D6B; user-select:all}
+.sfpc-pwonce p{flex:1 0 100%; margin:0; font-size:13px; color:#7A5200}
+.sfpc-team{scroll-margin-top:80px}

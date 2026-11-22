@@ -324,17 +324,19 @@ function sfpc_coach_only(?array $u): void {
    (두 파일의 값 이름이 같아야 한다). 색은 번호다. */
 const SFPC_CHAR = [
   'b' => ['label' => '몸', 'items' => ['robot' => '로봇', 'slime' => '슬라임', 'ghost' => '유령', 'cat' => '고양이', 'bread' => '식빵',
-                                        'potato' => '감자', 'alien' => '외계인', 'tofu' => '두부', 'dumpling' => '만두', 'cactus' => '선인장']],
+                                        'potato' => '감자', 'alien' => '외계인', 'tofu' => '두부', 'dumpling' => '만두', 'mushroom' => '버섯', 'pudding' => '푸딩']],
   'c' => ['label' => '색', 'items' => ['보라', '청록', '주황', '분홍', '파랑', '노랑', '연두', '회색', '빨강', '하양']],
   'e' => ['label' => '눈', 'items' => ['big' => '큰 눈', 'dot' => '점', 'smile' => '웃는 눈', 'sleepy' => '졸린 눈', 'cyclops' => '외눈',
-                                        'spin' => '뱅글뱅글', 'tear' => '눈물 글썽', 'odd' => '짝눈', 'heart' => '하트눈', 'visor' => '바이저']],
+                                        'spin' => '뱅글뱅글', 'tear' => '눈물 글썽', 'odd' => '짝눈', 'heart' => '하트눈', 'star' => '반짝 눈', 'angry' => '화난 눈', 'visor' => '바이저',
+                                        'sunglasses' => '선글라스', 'glasses' => '동그란 안경', 'swirl' => '뱅글 안경과 콧수염']],
   'm' => ['label' => '입', 'items' => ['none' => '없음', 'tongue' => '메롱', 'grin' => '씨익', 'o' => '뻐끔', 'drool' => '침 흘림',
-                                        'cat' => '고양이 입', 'frown' => '시무룩', 'mustache' => '콧수염']],
+                                        'cat' => '고양이 입', 'frown' => '시무룩', 'buck' => '앞니', 'candy' => '막대사탕', 'mustache' => '콧수염']],
   'h' => ['label' => '머리', 'items' => ['none' => '없음', 'antenna' => '안테나', 'crown' => '왕관', 'sprout' => '새싹', 'egg' => '계란후라이',
                                          'banana' => '바나나 껍질', 'pot' => '냄비', 'leek' => '대파', 'question' => '물음표', 'exclaim' => '느낌표',
-                                         'flowerpot' => '화분', 'book' => '책', 'party' => '고깔모자']],
+                                         'flowerpot' => '화분', 'book' => '책', 'party' => '고깔모자', 'propeller' => '프로펠러', 'storm' => '먹구름 번개',
+                                         'bulb' => '전구', 'fin' => '상어 지느러미', 'cone' => '공사장 고깔', 'halo' => '천사 고리', 'duck' => '오리']],
   'f' => ['label' => '이동 효과', 'items' => ['none' => '없음', 'sparkle' => '반짝이', 'bolt' => '번개', 'fire' => '불꽃', 'bits' => '0과 1',
-                                              'fart' => '방귀 구름', 'sweat' => '땀방울', 'note' => '음표', 'heart' => '하트', 'leaf' => '낙엽']],
+                                              'fart' => '방귀 구름', 'sweat' => '땀방울', 'note' => '음표', 'heart' => '하트', 'leaf' => '낙엽', 'bubble' => '비눗방울', 'zzz' => '쿨쿨']],
 ];
 /* 보낸 값에서 허용된 것만 남긴다. 하나라도 틀리면 null */
 function sfpc_char_clean($in): ?array {

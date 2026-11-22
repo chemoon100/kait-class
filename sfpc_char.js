@@ -28,7 +28,8 @@
     alien:    { t: 5, r: mix(R(6, 9, 3, 12), { 5: [[5, 10]], 10: [[4, 11]], 11: [[5, 10]], 12: [[6, 9]], 13: [[5, 5], [7, 8], [10, 10]], 14: [[5, 5], [7, 8], [10, 10]] }) },
     tofu:     { t: 6, r: mix(R(6, 13, 3, 12), { 14: [[5, 6], [9, 10]] }) },
     dumpling: { t: 6, r: mix(R(9, 12, 3, 12), { 6: [[6, 9]], 7: [[5, 10]], 8: [[4, 11]], 13: [[2, 13]], 14: [[3, 12]] }) },
-    cactus:   { t: 4, r: mix(R(11, 13, 5, 10), { 4: [[6, 9]], 5: [[5, 10]], 6: [[5, 10]], 7: [[2, 2], [5, 10], [13, 13]], 8: [[2, 2], [5, 10], [13, 13]], 9: [[2, 10], [13, 13]], 10: [[5, 13]], 14: [[4, 11]] }) }
+    mushroom: { t: 4, r: mix(R(9, 13, 5, 10), { 4: [[6, 9]], 5: [[4, 11]], 6: [[3, 12]], 7: [[2, 13]], 8: [[2, 13]], 14: [[5, 6], [9, 10]] }) },
+    pudding:  { t: 6, r: mix(R(8, 11, 3, 12), { 6: [[5, 10]], 7: [[4, 11]], 12: [[2, 13]], 13: [[2, 13]], 14: [[1, 14]] }) }
   };
   /* 색 — [밝은 쪽, 어두운 쪽] */
   var COLOR = [['#7F77DD', '#534AB7'], ['#5DCAA5', '#1D9E75'], ['#F0997B', '#D85A30'], ['#ED93B1', '#D4537E'],
@@ -49,6 +50,15 @@
     odd:     function (px) { px(4, 7, W, 3, 3); px(5, 8, K); px(10, 9, K); },
     heart:   function (px) { var H = '#D4537E'; px(4, 8, H); px(6, 8, H); px(4, 9, H, 3); px(5, 10, H);
                              px(9, 8, H); px(11, 8, H); px(9, 9, H, 3); px(10, 10, H); },
+    sunglasses: function (px) { px(3, 8, K, 10); px(4, 8, K, 3, 2); px(9, 8, K, 3, 2); px(5, 8, '#888780'); px(10, 8, '#888780'); },
+    swirl:   function (px, d, tk) { var q = Math.floor(tk / 10) % 2;                       /* 뱅글뱅글 안경에 코와 콧수염 */
+                                    px(4, 7, W, 3, 3); px(9, 7, W, 3, 3); px(7, 8, K, 2);
+                                    px(5, 8, K); px(q ? 4 : 6, 7, K); px(q ? 6 : 4, 9, K);
+                                    px(10, 8, K); px(q ? 9 : 11, 7, K); px(q ? 11 : 9, 9, K);
+                                    px(7, 9, PINK, 2); px(5, 10, '#4A1B0C', 6); px(4, 11, '#4A1B0C', 2); px(10, 11, '#4A1B0C', 2); },
+    glasses: function (px, d) { px(4, 7, K, 4, 4); px(9, 7, K, 4, 4); px(8, 8, K); px(5, 8, W, 2, 2); px(10, 8, W, 2, 2); px(5 + d, 9, K); px(10 + d, 9, K); },
+    angry:   function (px) { px(4, 7, K, 2); px(6, 8, K); px(10, 7, K, 2); px(9, 8, K); px(5, 9, K); px(10, 9, K); },
+    star:    function (px) { px(5, 7, Y, 1, 3); px(4, 8, Y, 3); px(10, 7, Y, 1, 3); px(9, 8, Y, 3); },
     visor:   function (px) { px(4, 8, K, 8, 2); px(5, 8, '#5DCAA5', 2); px(9, 8, '#5DCAA5'); }
   };
   var MOUTH = {
@@ -59,6 +69,8 @@
     drool:    function (px) { px(6, 11, K, 3); px(8, 12, BLUE, 1, 2); },
     cat:      function (px) { px(6, 11, K); px(7, 12, K); px(8, 11, K); px(9, 12, K); px(10, 11, K); },
     frown:    function (px) { px(6, 11, K, 4); px(5, 12, K); px(10, 12, K); },
+    buck:     function (px) { px(6, 11, K, 4); px(7, 12, W, 2, 2); },
+    candy:    function (px) { px(7, 11, K, 2); px(9, 11, W, 3); px(12, 10, '#D4537E', 2, 2); px(12, 10, W); },
     mustache: function (px) { px(5, 11, '#4A1B0C', 6); px(4, 12, '#4A1B0C', 2); px(10, 12, '#4A1B0C', 2); }
   };
   var HAT = {
@@ -75,13 +87,24 @@
     exclaim: function (px, t, tk) { var o = Math.floor(tk / 14) % 2; px(8, t - 5 - o, '#E24B4A', 1, 3); px(8, t - 1 - o, '#E24B4A'); },
     flowerpot: function (px, t) { px(6, t - 1, '#D85A30', 4); px(5, t - 2, '#993C1D', 6); px(8, t - 3, GRN); px(7, t - 4, PINK, 3); px(8, t - 5, PINK); px(8, t - 4, Y); },
     book:    function (px, t) { px(4, t - 1, '#F1EFE8', 8); px(4, t - 2, '#854F0B', 8); px(8, t - 1, '#B4B2A9'); px(5, t - 1, '#888780', 2); px(10, t - 1, '#888780'); },
+    propeller: function (px, t, tk) { var w = Math.floor(tk / 3) % 2;                      /* 머리 위에서 도는 프로펠러 */
+                                      px(8, t - 2, '#888780', 1, 2); if (w) px(4, t - 3, Y, 9); else px(7, t - 3, Y, 3); px(8, t - 3, '#E24B4A'); },
+    storm:   function (px, t, tk) { px(6, t - 6, '#D3D1C7', 4); px(5, t - 5, '#B4B2A9', 7); px(4, t - 4, '#888780', 9);   /* 먹구름과 번개 */
+                                    if (Math.floor(tk / 9) % 3) { px(8, t - 3, Y); px(7, t - 2, Y, 2); px(8, t - 1, Y); } },
+    bulb:    function (px, t, tk) { var on = Math.floor(tk / 24) % 2; px(7, t - 4, on ? Y : '#D3D1C7', 2); px(6, t - 3, on ? Y : '#D3D1C7', 4, 2); px(7, t - 1, '#888780', 2);
+                                    if (on) { px(4, t - 3, Y); px(11, t - 3, Y); px(5, t - 5, Y); px(10, t - 5, Y); } },
+    fin:     function (px, t) { px(7, t - 1, '#5F5E5A', 4); px(8, t - 2, '#5F5E5A', 3); px(9, t - 3, '#5F5E5A', 2); px(10, t - 4, '#5F5E5A'); },
+    cone:    function (px, t) { px(4, t - 1, '#D85A30', 8); px(6, t - 2, '#D85A30', 4); px(6, t - 3, W, 4); px(7, t - 4, '#D85A30', 2); px(7, t - 5, '#D85A30', 2); },
+    halo:    function (px, t, tk) { var o = Math.floor(tk / 22) % 2; px(6, t - 3 - o, Y, 4); px(5, t - 2 - o, Y); px(10, t - 2 - o, Y); px(6, t - 1 - o, Y, 4); },
+    duck:    function (px, t) { px(5, t - 2, Y, 6, 2); px(8, t - 4, Y, 3, 2); px(11, t - 3, '#D85A30', 2); px(9, t - 4, K); px(5, t - 3, Y); },
     party:   function (px, t) { px(6, t - 1, '#D4537E', 4); px(7, t - 2, Y, 2); px(7, t - 3, '#D4537E', 2); px(8, t - 4, '#5DCAA5'); px(8, t - 5, W); }
   };
   /* 몸마다 덧그리는 무늬 */
   var DECO = {
     bread:    function (px, c) { px(3, 4, c[1], 4); px(9, 4, c[1], 4); px(3, 5, c[1]); px(12, 5, c[1]); },
     dumpling: function (px, c) { px(6, 7, c[1]); px(8, 7, c[1]); px(10, 7, c[1]); },
-    cactus:   function (px, c) { px(7, 6, c[1]); px(9, 11, c[1]); px(6, 12, c[1]); },
+    mushroom: function (px) { px(5, 5, W, 2); px(9, 6, W, 2); px(11, 7, W); px(3, 7, W); },
+    pudding:  function (px) { px(5, 6, '#854F0B', 6); px(4, 7, '#854F0B', 8); px(4, 8, '#854F0B'); px(9, 8, '#854F0B', 2); px(10, 9, '#854F0B'); },
     potato:   function (px, c) { px(4, 7, c[1]); px(11, 10, c[1]); px(9, 6, c[1]); },
     robot:    function (px, c) { px(3, 10, c[1]); px(12, 10, c[1]); }
   };
@@ -108,6 +131,8 @@
     sweat:   function (g, p, u, s) { g.fillStyle = BLUE; g.fillRect(p.x, p.y - (6.5 - u * 4.5) * s, .7 * s, 1.3 * s); },
     note:    function (g, p, u, s) { g.fillStyle = PINK; var yy = p.y - (4 + u * 3.3) * s; g.fillRect(p.x, yy, .7 * s, 2.7 * s); g.fillRect(p.x - s, yy + 2 * s, 1.4 * s, s); g.fillRect(p.x, yy, 1.7 * s, .7 * s); },
     heart:   function (g, p, u, s) { g.fillStyle = '#D4537E'; var yy = p.y - (3 + u * 3) * s; g.fillRect(p.x, yy, s, s); g.fillRect(p.x + 2 * s, yy, s, s); g.fillRect(p.x, yy + s, 3 * s, s); g.fillRect(p.x + s, yy + 2 * s, s, s); },
+    bubble:  function (g, p, u, s) { g.fillStyle = BLUE; var z = (1.2 + u * 2) * s, yy = p.y - u * 5 * s; g.fillRect(p.x, yy, z, .5 * s); g.fillRect(p.x, yy + z, z + .5 * s, .5 * s); g.fillRect(p.x, yy, .5 * s, z); g.fillRect(p.x + z, yy, .5 * s, z); },
+    zzz:     function (g, p, u, s) { g.fillStyle = '#AFA9EC'; g.font = '700 ' + Math.round((3 + u * 3) * s) + 'px monospace'; g.fillText('z', p.x, p.y - (4 + u * 5) * s); },
     leaf:    function (g, p, u, s) { g.fillStyle = u > .5 ? '#BA7517' : LGRN; var xx = p.x + Math.sin(u * 6) * 2 * s; g.fillRect(xx, p.y - (5 - u * 6) * s, 1.4 * s, .7 * s); g.fillRect(xx + .7 * s, p.y - (5 - u * 6) * s + .7 * s, .7 * s, .7 * s); }
   };
   function puff(S, x, y, P, dir) {

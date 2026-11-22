@@ -39,9 +39,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$viewAs) {
     if ($act === 'pw' && $pw !== (string)($_POST['pw2'] ?? '')) redirect_with('', '비밀번호를 두 번 똑같이 입력해 주세요.');
     $e = sfpc_account_set_pw($t, $pw, $u);
     if ($e !== '') redirect_with('', $e);
-    redirect_with($act === 'pw_random'
-      ? '"' . $t['team_name'] . '" 팀 계정 ' . sfpc_account_id($t) . ' 의 새 비밀번호는  ' . $pw . '  입니다. 지금 적어 두세요 — 이 화면을 벗어나면 다시 볼 수 없습니다.'
-      : '"' . $t['team_name'] . '" 팀 계정 ' . sfpc_account_id($t) . ' 의 비밀번호를 정했습니다.');
+    /* 무작위 비밀번호는 그 팀 칸 안에 한 번만 크게 보여 준다 (다음 화면에서 꺼내고 지운다) */
+    if ($act === 'pw_random') $_SESSION['sfpc_pw_once'] = ['team' => (int)$t['id'], 'pw' => $pw];
+    $_SESSION['flash'] = ['msg' => '"' . $t['team_name'] . '" 팀 계정 ' . sfpc_account_id($t)
+      . ($act === 'pw_random' ? ' 의 새 비밀번호를 만들었습니다. 아래 팀 칸에 표시된 비밀번호를 지금 적어 두세요.' : ' 의 비밀번호를 정했습니다.'), 'err' => ''];
+    header('Location: sfpc_teams.php#team-' . (int)$t['id']); exit;
   }
   if (!$canEdit)                                         redirect_with('', '접수 기간이 아니어서 바꿀 수 없습니다.');
   if ($act === 'cancel' && $t['status'] === 'submitted') {
@@ -60,6 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$viewAs) {
 }
 
 [$msg, $err] = flash_take();
+$pwOnce = $_SESSION['sfpc_pw_once'] ?? null; unset($_SESSION['sfpc_pw_once']);
 $teams = sfpc_teams_of($ownerId);
 $state = sfpc_apply_state();
 $accOpen = sfpc_account_open();
@@ -104,7 +107,7 @@ sfpc_css();
   <?php else: foreach ($teams as $t):
     $members = sfpc_team_members((int)$t['id']);
     $off = $t['status'] !== 'submitted'; ?>
-    <div class="sfpc-team<?= $off ? ' off' : '' ?>">
+    <div id="team-<?= (int)$t['id'] ?>" class="sfpc-team<?= $off ? ' off' : '' ?>">
       <div class="sfpc-team-h">
         <h2><?= h($t['team_name']) ?></h2>
         <?= sfpc_status_badge($t) ?>
@@ -144,6 +147,14 @@ sfpc_css();
             <?php if ($hasPw): ?><span class="st ok">비밀번호 정함 · <?= h(substr((string)$t['account_pw_at'], 5, 11)) ?></span>
             <?php else: ?><span class="st no">비밀번호를 아직 정하지 않았습니다</span><?php endif; ?>
           </div>
+          <?php if (!$viewAs && $pwOnce && (int)$pwOnce['team'] === (int)$t['id']): ?>
+            <div class="sfpc-pwonce" role="status">
+              <span class="cap">새 비밀번호</span>
+              <code id="pwOnce"><?= h($pwOnce['pw']) ?></code>
+              <button type="button" class="btn sm" onclick="navigator.clipboard && navigator.clipboard.writeText(document.getElementById('pwOnce').textContent).then(function(){ this.textContent='복사했습니다'; }.bind(this))">복사</button>
+              <p>지금 적어 두세요. 이 화면을 벗어나거나 새로 고치면 다시 볼 수 없습니다. 팀원에게 아이디 <b><?= h(sfpc_account_id($t)) ?></b> 와 이 비밀번호를 알려 주세요.</p>
+            </div>
+          <?php endif; ?>
           <?php if (!$viewAs): ?>
           <details<?= $hasPw ? '' : ' open' ?>>
             <summary><?= $hasPw ? '비밀번호 바꾸기' : '비밀번호 정하기' ?></summary>
