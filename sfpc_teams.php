@@ -164,8 +164,8 @@ sfpc_css();
               <input type="password" name="pw2" placeholder="한 번 더" maxlength="72" autocomplete="new-password" aria-label="새 비밀번호 확인">
               <button class="btn sm primary" name="act" value="pw">이 비밀번호로 정하기</button>
               <span class="or">또는</span>
-              <button class="btn sm" name="act" value="pw_random" formnovalidate
-                      onclick="return confirm('무작위 비밀번호를 새로 만들까요?<?= $hasPw ? '\n지금 쓰는 비밀번호는 더 쓸 수 없게 됩니다.' : '' ?>')">무작위로 만들기</button>
+              <button class="btn sm js-pwrand" type="button">무작위로 만들기</button>
+              <span class="rand-note" hidden>무작위 비밀번호를 두 칸에 넣었습니다. 눈 모양을 눌러 확인하고 적어 둔 뒤 "이 비밀번호로 정하기"를 누르세요.</span>
             </form>
             <p class="hint">팀원들이 이 아이디와 비밀번호로 함께 로그인합니다. 비밀번호는 저장된 것을 다시 볼 수 없으니, 잊으면 새로 정해 주세요.</p>
           </details>
@@ -182,4 +182,5 @@ sfpc_css();
     </div>
   <?php endif; ?>
 </div>
+<?php sfpc_pw_eye(); ?>
 <?php page_foot(); ?>

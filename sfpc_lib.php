@@ -302,6 +302,40 @@ function sfpc_account_set_pw(array $t, string $pw, array $actor): string {
            ($t['account_pw_at'] ?? '') === '' ? '팀 계정 ' . $login . ' 의 비밀번호를 처음 정함' : '팀 계정 ' . $login . ' 의 비밀번호를 바꿈');
   return '';
 }
+/* 비밀번호 칸 오른쪽에 "보기" 눈 버튼을 붙이고, .js-pwrand 버튼에는 무작위 비밀번호 채우기를 건다.
+   이 함수를 부른 화면의 모든 비밀번호 칸에 적용된다. 무작위 비밀번호는 브라우저가 만들어 두 칸에 넣을 뿐이고,
+   저장은 사람이 "정하기"를 눌러야 된다. */
+function sfpc_pw_eye(): void { ?>
+<script>
+(function () {
+  var EYE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var OFF = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.9 10.9 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.1M6.6 6.6C3.7 8.5 2 12 2 12s3.6 7 10 7c1.7 0 3.2-.5 4.5-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+  document.querySelectorAll('input[type=password]').forEach(function (inp) {
+    var wrap = document.createElement('span'); wrap.className = 'sfpc-pw';
+    inp.parentNode.insertBefore(wrap, inp); wrap.appendChild(inp);
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'sfpc-pw-eye';
+    function set(show) {
+      inp.type = show ? 'text' : 'password'; b.innerHTML = show ? OFF : EYE;
+      b.setAttribute('aria-label', show ? '비밀번호 숨기기' : '비밀번호 보기'); b.title = b.getAttribute('aria-label');
+      b.setAttribute('aria-pressed', show ? 'true' : 'false');
+    }
+    b.addEventListener('click', function () { set(inp.type === 'password'); });
+    inp.form && inp.form.addEventListener('submit', function () { inp.type = 'password'; });   /* 보낼 때는 다시 가린다 */
+    set(false); wrap.appendChild(b);
+  });
+  var ABC = 'abcdefghjkmnpqrstuvwxyz23456789';
+  document.querySelectorAll('.js-pwrand').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var f = btn.form, a = new Uint32Array(8), pw = ''; crypto.getRandomValues(a);
+      for (var i = 0; i < a.length; i++) pw += ABC[a[i] % ABC.length];
+      f.querySelectorAll('input[name=pw], input[name=pw2]').forEach(function (inp) { inp.value = pw; });
+      var n = f.querySelector('.rand-note'); if (n) n.hidden = false;
+    });
+  });
+})();
+</script>
+<?php }
+
 /* 팀 이름 · 상태가 바뀌면 계정에도 맞춘다. 팀을 저장하는 곳마다 부른다. */
 function sfpc_account_sync(int $teamId): void {
   $t = sfpc_team($teamId);

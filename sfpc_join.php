@@ -162,4 +162,5 @@ sfpc_css();
     <?php endif; ?>
   </form>
 </div>
+<?php sfpc_pw_eye(); ?>
 <?php page_foot(); ?>
