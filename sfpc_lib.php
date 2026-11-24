@@ -14,7 +14,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib.php';
 
 /* 표 구조를 바꿀 때마다 1씩 올린다 */
-const SFPC_SCHEMA = 9;
+const SFPC_SCHEMA = 10;
 
 /* 올해 대회. 내년에는 이 값과 설정만 바꾸면 접수를 새로 받을 수 있다. */
 const SFPC_CONTEST = '2026';
@@ -229,6 +229,19 @@ if ((int)sfpc_setting('sfpc_schema') !== SFPC_SCHEMA) {
     db()->exec("UPDATE sfpc_teams SET onsite = 0 WHERE kind = 'teacher'");
     db()->exec("UPDATE sfpc_members SET shirt = '' WHERE team_id IN (SELECT id FROM sfpc_teams WHERE kind = 'teacher')");
   }
+  /* 10 — 문의. 팀 계정 · 지도교사가 글을 남기면 운영진이 답한다 (sfpc_ask.php).
+          kind 'ops' 운영 문의 → 교육팀, 'prob' 문제 문의 → 문항 제작팀 (admin 은 둘 다).
+          last_by 가 'user' 면 답을 기다리는 글, 'staff' 면 운영진이 마지막으로 쓴 글이다. */
+  db()->exec("CREATE TABLE IF NOT EXISTS sfpc_qna(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, contest TEXT NOT NULL, kind TEXT NOT NULL,
+    user_id INTEGER NOT NULL, team_id INTEGER, coach_user_id INTEGER, problem_id INTEGER, prob_label TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL, closed INTEGER NOT NULL DEFAULT 0, last_by TEXT NOT NULL DEFAULT 'user',
+    user_seen_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)");
+  db()->exec("CREATE INDEX IF NOT EXISTS idx_sfpc_qna ON sfpc_qna(contest, last_by, kind)");
+  db()->exec("CREATE TABLE IF NOT EXISTS sfpc_qna_msg(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, qna_id INTEGER NOT NULL, user_id INTEGER, by_staff INTEGER NOT NULL DEFAULT 0,
+    author TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL)");
+  db()->exec("CREATE INDEX IF NOT EXISTS idx_sfpc_qna_msg ON sfpc_qna_msg(qna_id, id)");
   /* 학교 목록이 비어 있으면 함께 넣어 둔 목록으로 채운다 — 설치만 하면 학교 찾기가 바로 된다 */
   if ((int)db()->query("SELECT COUNT(*) FROM sfpc_schools")->fetchColumn() === 0 && sfpc_schools_load_bundled() > 0) {
     setting_set('sfpc_schools_at', now());
@@ -732,6 +745,7 @@ function sfpc_stage_bar(?array $u, string $nav, string $root = ''): bool {
     $link = fn(int $i) => $root . 'problem.php?no=' . (int)$probs[$i]['prob_no'] . '&amp;set=' . (int)$set['id'];
     echo '<a class="back" href="' . h($root) . 'sfpc_study.php">← 지도로</a><b>공부하기' . ($idx >= 0 ? ' · ' . ($idx + 1) . '번' : '') . '</b>'
        . '<span class="pill">' . $got . ' / ' . count($need) . '</span><span class="g"></span>'
+       . ($idx >= 0 && !is_admin($u) ? '<a class="ask" href="' . h($root) . 'sfpc_ask.php?new=prob&amp;no=' . $no . '">이 문제 질문하기</a>' : '')
        . ($idx > 0 ? '<a href="' . $link($idx - 1) . '">◀ ' . $idx . '번</a>' : '')
        . ($idx >= 0 && $idx < count($probs) - 1 ? '<a href="' . $link($idx + 1) . '">' . ($idx + 2) . '번 ▶</a>' : '');
   } else {
@@ -740,12 +754,41 @@ function sfpc_stage_bar(?array $u, string $nav, string $root = ''): bool {
        . '<span class="pill">' . $got . ' / ' . count($need) . '</span><span class="g"></span>'
        . '<a' . $on('sfpc_study.php') . ' href="' . h($root) . 'sfpc_study.php">지도</a>'
        . '<a href="' . h($root) . 'sfpc_study.php?view=list">목록</a>'
-       . '<a' . $on('sfpc_rank.php') . ' href="' . h($root) . 'sfpc_rank.php">연타 순위</a>';
+       . '<a' . $on('sfpc_rank.php') . ' href="' . h($root) . 'sfpc_rank.php">연타 순위</a>'
+       . '<a href="' . h($root) . 'sfpc_ask.php">문의' . sfpc_qna_dot($u) . '</a>';
   }
   echo '<a class="me" href="' . h($root . ($team ? 'sfpc_me.php' : (is_admin($u) ? 'admin/sfpc.php?tab=study' : 'sfpc_teams.php'))) . '">'
      . h($team ? $team['team_name'] : ($u['name'] !== '' ? $u['name'] : $u['login_id'])) . '</a>'
      . '<a href="' . h($root) . 'logout.php">로그아웃</a></div></header>';
   return true;
+}
+
+/* ── 문의 (sfpc_ask.php) ─────────────────────────── */
+const SFPC_QNA_KIND = ['ops' => '운영 문의', 'prob' => '문제 문의'];
+const SFPC_QNA_STAFF = ['sfpcedu' => 'ops', 'sfpcset' => 'prob'];   /* 이 계정은 자기 몫의 문의만 "새 문의"로 센다. 그 밖의 운영 계정은 모두 */
+/* 이 사람이 볼 수 있는 문의의 조건 — [SQL, 값]. 팀 계정은 그 팀의 글, 지도교사는 자기 글과 자기 팀들의 글 */
+function sfpc_qna_scope(array $u): array {
+  $team = sfpc_my_team($u);
+  if ($team) return ['(q.team_id = ? OR q.user_id = ?)', [(int)$team['id'], (int)$u['id']]];
+  return ['(q.user_id = ? OR q.coach_user_id = ?)', [(int)$u['id'], (int)$u['id']]];
+}
+/* 위쪽 메뉴의 빨간 점 — 운영진: 답을 기다리는 문의 수, 그 밖: 아직 읽지 않은 답의 수 */
+function sfpc_qna_badge(?array $u): int {
+  static $memo = [];
+  if (!$u) return 0;
+  $uid = (int)$u['id'];
+  if (isset($memo[$uid])) return $memo[$uid];
+  if (is_admin($u)) {
+    $k = SFPC_QNA_STAFF[$u['login_id']] ?? '';
+    return $memo[$uid] = (int)col("SELECT COUNT(*) FROM sfpc_qna q WHERE q.contest = ? AND q.closed = 0 AND q.last_by = 'user'" . ($k !== '' ? " AND q.kind = " . db()->quote($k) : ''), [SFPC_CONTEST]);
+  }
+  if (($u['source'] ?? '') !== SFPC_ACCOUNT_SOURCE && !sfpc_coach($u)) return $memo[$uid] = 0;
+  [$w, $a] = sfpc_qna_scope($u);
+  return $memo[$uid] = (int)col("SELECT COUNT(*) FROM sfpc_qna q WHERE q.contest = ? AND $w AND q.last_by = 'staff' AND q.updated_at > q.user_seen_at", array_merge([SFPC_CONTEST], $a));
+}
+function sfpc_qna_dot(?array $u): string {
+  $n = sfpc_qna_badge($u);
+  return $n > 0 ? ' <span class="sfpc-dot" title="' . (is_admin($u) ? '답을 기다리는 문의' : '새 답변') . ' ' . $n . '건">' . $n . '</span>' : '';
 }
 
 /* ── 보스와 연타 ──────────────────────────────────

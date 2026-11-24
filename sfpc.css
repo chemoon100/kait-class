@@ -442,3 +442,31 @@ table.sfpc-pvlinks td a:hover{text-decoration:none; background:var(--b50)}
 .sfpc-cancel p{margin:0 0 8px; font-size:13px}
 .sfpc-cancel .r{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
 .sfpc-cancel input[type=text]{width:120px}
+
+/* 문의 */
+.sfpc-dot{display:inline-block; min-width:17px; height:17px; line-height:17px; padding:0 5px; margin-left:4px; border-radius:9px; background:#E24B4A; color:#fff; font-size:11px; font-weight:700; text-align:center; vertical-align:1px}
+.sfpc-bar .ask{color:#FAC775}
+.sfpc-ask-list{list-style:none; margin:0; padding:0; display:grid; gap:8px}
+.sfpc-ask-list a{display:flex; align-items:center; gap:12px; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:#fff; text-decoration:none; color:var(--ink)}
+.sfpc-ask-list a:hover{border-color:var(--b400)}
+.sfpc-ask-list .t{flex:1; min-width:0}
+.sfpc-ask-list .t b{display:block; font-size:15px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.sfpc-ask-list .t small{display:block; font-size:12px; color:var(--ink-3); margin-top:2px}
+.sfpc-ask .sfpc-flag.k-ops{background:#EEF2FB; color:#2B4A9B}
+.sfpc-ask .sfpc-flag.k-prob{background:#FBF1DE; color:#8A5A0B}
+.sfpc-ask-filter{display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:0 0 10px}
+.sfpc-ask-filter a{padding:6px 12px; border:1px solid var(--line); border-radius:16px; font-size:13px; text-decoration:none; color:var(--ink-2, #444)}
+.sfpc-ask-filter a.on{background:var(--b500); border-color:var(--b500); color:#fff}
+.sfpc-ask-filter a i{font-style:normal; font-weight:700; margin-left:3px}
+.sfpc-ask-filter .sep{width:1px; height:18px; background:var(--line); margin:0 6px}
+.sfpc-ask-h{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:0 0 6px}
+.sfpc-ask-h h2{margin:0; font-size:19px; flex:1; min-width:200px}
+.sfpc-ask-thread{display:grid; gap:10px; margin:0 0 18px}
+.sfpc-ask-thread .m{max-width:88%; padding:11px 14px; border:1px solid var(--line); border-radius:12px; background:#fff}
+.sfpc-ask-thread .m.staff{justify-self:end; background:#EEF2FB; border-color:#C9D6F2}
+.sfpc-ask-thread .by{display:flex; gap:10px; align-items:baseline; font-size:12px; margin-bottom:4px}
+.sfpc-ask-thread .by time{color:var(--ink-3)}
+.sfpc-ask-thread .tx{font-size:14px; line-height:1.65; overflow-wrap:anywhere}
+.sfpc-ask-form label{font-weight:700; font-size:13px}
+.sfpc-ask-form textarea{width:100%; margin-top:6px; font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:8px; resize:vertical}
+.sfpc-ask-form .btnrow{margin-top:10px}

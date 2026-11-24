@@ -407,6 +407,7 @@ sfpc_css('../');
     <?php foreach (SFPC_TABS as $k => $label): ?>
       <a class="<?= $tab === $k ? 'on' : '' ?>" href="?tab=<?= h($k) ?>"><?= h($label) ?></a>
     <?php endforeach; ?>
+    <a href="../sfpc_ask.php">문의함<?= sfpc_qna_dot($me) ?></a>
   </div>
 
   <?php if ($msg): ?><div class="note ok"><?= h($msg) ?></div><?php endif; ?>

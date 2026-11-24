@@ -213,6 +213,9 @@ function page_head(array $o): void {
         <?php if (($u['source'] ?? '') === SFPC_ACCOUNT_SOURCE): ?>
           <a class="<?= $nav === 'sfpc_me' ? 'on' : '' ?>" href="<?= h($root) ?>sfpc_me.php">우리 팀</a>
         <?php endif; ?>
+        <?php if ($u && (($u['source'] ?? '') === SFPC_ACCOUNT_SOURCE || $isAdmin || sfpc_coach($u))): /* 문의 — 새 답(운영진에게는 새 문의)이 있으면 빨간 점 */ ?>
+          <a class="<?= $nav === 'sfpc_ask' ? 'on' : '' ?>" href="<?= h($root) ?>sfpc_ask.php">문의<?= sfpc_qna_dot($u) ?></a>
+        <?php endif; ?>
       <?php endif; ?>
       <?php foreach (JNAV as $k => [$label, $sHref, $aHref, $guestOk, $adminOnly]): ?>
         <?php
