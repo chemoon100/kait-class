@@ -212,6 +212,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect_with(sfpc_team_no($t) . ' "' . $t['team_name'] . '" 팀을 고쳤습니다.');
   }
 
+  /* 참가 구분이 바뀐 팀의 계정 이름을 다시 매긴다 */
+  if ($act === 'team_reissue') {
+    $t = sfpc_team((int)($_POST['id'] ?? 0));
+    if (!$t) redirect_with('', '팀을 찾지 못했습니다.');
+    $old = sfpc_account_id($t);
+    $e = sfpc_account_reissue($t, $me);
+    if ($e !== '') redirect_with('', $e);
+    redirect_with(sfpc_team_no($t) . ' "' . $t['team_name'] . '" 팀 계정을 다시 발급했습니다: ' . $old . ' → ' . sfpc_account_id(sfpc_team((int)$t['id'])) . ' (비밀번호는 그대로입니다. 지도교사에게 새 이름을 알려 주세요.)');
+  }
+
   /* 팀 계정 비밀번호를 무작위로 새로 만든다 — 지도교사와 연락이 안 될 때 운영진이 대신 */
   if ($act === 'team_pw') {
     $t = sfpc_team((int)($_POST['id'] ?? 0));
@@ -291,7 +301,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     setting_set('sfpc_schedule', trim((string)($_POST['schedule'] ?? '')));
     setting_set('sfpc_privacy', trim((string)($_POST['privacy'] ?? '')));
     setting_set('sfpc_contact', sfpc_clean((string)($_POST['contact'] ?? ''), 100));
-    foreach (['menu_on', 'landing_on', 'account_open', 'contest_open', 'board_open'] as $k) setting_set('sfpc_' . $k, !empty($_POST[$k]) ? '1' : '0');
+    foreach (['site', 'menu_on', 'landing_on', 'account_open', 'study_open', 'ready_open', 'contest_open', 'board_open'] as $k) setting_set('sfpc_' . $k, !empty($_POST[$k]) ? '1' : '0');
     redirect_with('설정을 저장했습니다.');
   }
 
@@ -506,6 +516,11 @@ sfpc_css('../');
                     <?php if (($t['account_pw_at'] ?? '') !== ''): ?><span class="st ok">비밀번호 정함 · <?= h(substr((string)$t['account_pw_at'], 5, 11)) ?></span>
                     <?php else: ?><span class="st no">비밀번호 없음</span><?php endif; ?></div>
                   <a class="btn sm" href="../sfpc_me.php?team=<?= (int)$t['id'] ?>" target="_blank" rel="noopener" style="margin-top:8px">팀 화면 보기</a>
+                  <?php if (sfpc_account_stale($t)): ?>
+                    <p class="small" style="margin:8px 0 0; color:#B45309">참가 구분이 바뀌어 계정 이름이 맞지 않습니다. 지금 구분으로는 <code><?= h(sfpc_account_want($t)) ?></code> 입니다.</p>
+                    <button class="btn sm" name="act" value="team_reissue" style="margin-top:6px"
+                            onclick="return confirm('계정 이름을 <?= h(sfpc_account_want($t)) ?> 로 바꿀까요?\n비밀번호 · 캐릭터 · 기록은 그대로이고, 이전 이름으로는 로그인할 수 없게 됩니다.')">계정 다시 발급</button>
+                  <?php endif; ?>
                   <?php if ($t['status'] === 'submitted'): ?>
                     <button class="btn sm" name="act" value="team_pw" style="margin-top:8px"
                             onclick="return confirm('이 팀 계정의 비밀번호를 무작위로 새로 만들까요?\n지금 쓰는 비밀번호는 더 쓸 수 없게 됩니다.')">비밀번호 새로 만들기</button>
@@ -738,14 +753,19 @@ sfpc_css('../');
 
     <fieldset>
       <legend>화면 공개</legend>
-      <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="menu_on" value="1"<?= sfpc_setting('sfpc_menu_on') === '1' ? ' checked' : '' ?>>
-        위쪽 메뉴와 첫 화면에 SFPC 보이기</label>
+      <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="site" value="1"<?= sfpc_setting('sfpc_site') === '1' ? ' checked' : '' ?>>
+        SFPC 전용 사이트로 쓰기 <span class="muted">— 위쪽 메뉴가 접수 · 공부하기 · 준비하기 · 도전하기 · 스코어보드가 되고, 문제 모음 · 채점 결과 · 수업 · 평가는 운영진에게만 보입니다</span></label>
+      <input type="hidden" name="menu_on" value="1">
       <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="landing_on" value="1"<?= sfpc_setting('sfpc_landing_on') === '1' ? ' checked' : '' ?>>
-        접수 전 · 접수 중에는 사이트 첫 화면을 SFPC 안내로 바꾸기 <a href="../sfpc_landing.php" target="_blank" rel="noopener" style="margin-left:6px">미리 보기</a></label>
+        사이트 첫 화면을 SFPC 안내 화면으로 <a href="../sfpc_landing.php" target="_blank" rel="noopener" style="margin-left:6px">미리 보기</a></label>
       <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="account_open" value="1"<?= sfpc_setting('sfpc_account_open') === '1' ? ' checked' : '' ?>>
         팀 계정 나눠 주기 <span class="muted">— 켜면 지도교사의 "내 팀" 화면에 팀 아이디가 보이고, 비밀번호를 정할 수 있습니다</span></label>
+      <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="study_open" value="1"<?= sfpc_setting('sfpc_study_open') === '1' ? ' checked' : '' ?>>
+        공부하기 공개</label>
+      <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="ready_open" value="1"<?= sfpc_setting('sfpc_ready_open') === '1' ? ' checked' : '' ?>>
+        준비하기 공개</label>
       <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="contest_open" value="1"<?= sfpc_setting('sfpc_contest_open') === '1' ? ' checked' : '' ?>>
-        대회 참가 화면 공개</label>
+        도전하기(본 대회) 공개</label>
       <label class="chk" style="margin-bottom:10px"><input type="checkbox" name="board_open" value="1"<?= sfpc_setting('sfpc_board_open') === '1' ? ' checked' : '' ?>>
         스코어보드 공개</label>
       <p class="small muted" style="margin:0 0 16px">공개하지 않은 화면은 "준비 중" 안내만 보입니다. 운영진 계정으로는 공개 전에도 들어가 볼 수 있습니다.</p>
@@ -758,13 +778,15 @@ sfpc_css('../');
         <tr><th>첫 화면</th><td>
           <a href="../sfpc_landing.php?as=before" target="_blank" rel="noopener">접수 전</a>
           <a href="../sfpc_landing.php?as=open" target="_blank" rel="noopener">접수 중</a>
-          <span class="muted">마감 후에는 기존 첫 화면으로 돌아갑니다</span></td></tr>
+          <a href="../sfpc_landing.php?as=closed" target="_blank" rel="noopener">마감 후</a></td></tr>
         <tr><th>접수 안내</th><td>
           <a href="../sfpc.php?as=before" target="_blank" rel="noopener">접수 전</a>
           <a href="../sfpc.php?as=open" target="_blank" rel="noopener">접수 중</a>
           <a href="../sfpc.php?as=closed" target="_blank" rel="noopener">마감 후</a></td></tr>
         <tr><th>준비 중 안내</th><td>
-          <a href="../sfpc_contest.php?as=guest" target="_blank" rel="noopener">대회 참가</a>
+          <a href="../sfpc_study.php?as=guest" target="_blank" rel="noopener">공부하기</a>
+          <a href="../sfpc_ready.php?as=guest" target="_blank" rel="noopener">준비하기</a>
+          <a href="../sfpc_contest.php?as=guest" target="_blank" rel="noopener">도전하기</a>
           <a href="../sfpc_board.php?as=guest" target="_blank" rel="noopener">스코어보드</a>
           <span class="muted">공개 전에 방문자가 보는 화면</span></td></tr>
       </table>

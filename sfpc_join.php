@@ -53,8 +53,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $err = '이름을 입력하세요.';
   } elseif ($phone === '') {
     $err = '연락처를 확인해 주세요. 예: 010-1234-5678';
-  } elseif ($in['email'] !== '' && (!filter_var($in['email'], FILTER_VALIDATE_EMAIL) || strlen($in['email']) > 100)) {
+  } elseif ($in['email'] === '') {
+    $err = '이메일 주소를 입력하세요. 대회 안내를 이 주소로 보내 드립니다.';
+  } elseif (!filter_var($in['email'], FILTER_VALIDATE_EMAIL) || strlen($in['email']) > 100) {
     $err = '이메일 주소를 확인해 주세요.';
+  } elseif (($typo = sfpc_email_typo($in['email'])) !== '') {
+    $err = '이메일 주소의 "' . $typo[0] . '" 는 "' . $typo[1] . '" 의 오타로 보입니다. 확인해 주세요.';
+  } elseif (strcasecmp($in['email'], trim((string)($_POST['email2'] ?? ''))) !== 0) {
+    $err = '이메일 주소를 두 번 똑같이 입력해 주세요.';
   } elseif ($needAccount && one("SELECT 1 FROM users WHERE login_id = ?", [$in['id']])) {
     $err = '이미 쓰이고 있는 아이디입니다.';
   } else {
@@ -145,9 +151,31 @@ sfpc_css();
       <span class="hint">대회 안내와 계정 전달에 씁니다</span>
     </div>
     <div class="field">
-      <label for="jemail">이메일 <span class="hint" style="display:inline; margin:0 0 0 4px">선택</span></label>
-      <input type="email" id="jemail" name="email" autocomplete="email" maxlength="100" value="<?= h($in['email']) ?>">
+      <label for="jemail">이메일</label>
+      <input type="email" id="jemail" name="email" autocomplete="email" maxlength="100" required value="<?= h($in['email']) ?>">
+      <span class="hint">대회 안내를 이 주소로 보냅니다. 자주 확인하는 주소를 적어 주세요</span>
     </div>
+    <div class="field">
+      <label for="jemail2">이메일 확인</label>
+      <input type="email" id="jemail2" name="email2" autocomplete="off" maxlength="100" required
+             value="<?= h($_SERVER['REQUEST_METHOD'] === 'POST' ? trim((string)($_POST['email2'] ?? '')) : $in['email']) ?>">
+      <span class="hint" id="jemailMsg">같은 주소를 한 번 더 적어 주세요 (붙여 넣지 말고 직접)</span>
+    </div>
+    <script>
+    (function () {
+      var a = document.getElementById('jemail'), b = document.getElementById('jemail2'), m = document.getElementById('jemailMsg');
+      var TYPO = <?= json_encode(SFPC_EMAIL_TYPO) ?>;
+      b.addEventListener('paste', function (e) { e.preventDefault(); });
+      function chk() {
+        var v = a.value.trim().toLowerCase(), w = b.value.trim().toLowerCase(), d = v.split('@')[1] || '';
+        if (TYPO[d])            { m.textContent = '"' + d + '" 는 "' + TYPO[d] + '" 의 오타로 보입니다.'; m.style.color = '#B42318'; }
+        else if (w && v !== w)  { m.textContent = '두 주소가 서로 다릅니다.'; m.style.color = '#B42318'; }
+        else if (w && v === w)  { m.textContent = '두 주소가 같습니다.'; m.style.color = '#1F7A4D'; }
+        else                    { m.textContent = '같은 주소를 한 번 더 적어 주세요 (붙여 넣지 말고 직접)'; m.style.color = ''; }
+      }
+      a.addEventListener('input', chk); b.addEventListener('input', chk); chk();
+    })();
+    </script>
     <div style="position:absolute; left:-9999px" aria-hidden="true">
       <label>비워 두세요 <input type="text" name="homepage" tabindex="-1" autocomplete="off"></label>
     </div>

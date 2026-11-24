@@ -11,7 +11,7 @@ require __DIR__ . '/guard.php';
 require __DIR__ . '/layout.php';
 $u = me();
 
-page_head(['title' => '스코어보드', 'root' => '', 'user' => $u, 'nav' => 'sfpc']);
+page_head(['title' => '스코어보드', 'root' => '', 'user' => $u, 'nav' => 'sfpc_board']);
 sfpc_css();
 if (sfpc_gate('sfpc_board_open', '스코어보드', $u)):
 ?>

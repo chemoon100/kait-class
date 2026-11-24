@@ -14,6 +14,7 @@ if ($next !== '' && !preg_match('#^/[^/\\\\]#', $next)) $next = '';
 function after_login(array $u, string $next): string {
   if ($next !== '') return $next;
   if (($u['source'] ?? '') === 'sfpc_team') return 'sfpc_me.php';   /* SFPC 팀 계정은 팀 화면으로 */
+  if (($u['source'] ?? '') === 'sfpc') return 'sfpc_teams.php';     /* 지도교사는 내 팀으로 */
   return $u['role'] === 'admin' ? 'problems.php' : 'index.php';   /* 1.17.0 — 교사도 문제 모음 하나로 */
 }
 

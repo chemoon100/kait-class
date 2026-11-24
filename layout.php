@@ -168,7 +168,8 @@ function page_head(array $o): void {
   $root  = $o['root'] ?? '';
   $u     = $o['user'] ?? null;
   $nav   = $o['nav'] ?? '';
-  sfpc_char_gate($u, $root);   /* SFPC 팀 계정은 캐릭터를 만들기 전에는 다른 화면으로 가지 못한다 */
+  sfpc_char_gate($u, $root);
+  sfpc_site_gate($u, (string)$nav, $root);   /* SFPC 사이트에서는 기존 KAIT-CLASS 화면을 운영진만 쓴다 */   /* SFPC 팀 계정은 캐릭터를 만들기 전에는 다른 화면으로 가지 못한다 */
   $site  = site_name();
   $title = ($o['title'] ?? '') !== '' ? $o['title'] . ' · ' . $site : $site;
   $isAdmin  = ($u['role'] ?? '') === 'admin';
@@ -203,8 +204,18 @@ function page_head(array $o): void {
       <?php else: ?><?= h($site) ?><?php endif; ?>
     </a>
     <nav class="mainnav">
+      <?php $sfSite = sfpc_site(); ?>
+      <?php if ($sfSite): /* SFPC 사이트의 메뉴 (sfpc_lib.php 의 SFPC_NAV) */ ?>
+        <?php foreach (SFPC_NAV as $k => [$label, $href]): ?>
+          <a class="<?= $nav === $k ? 'on' : '' ?>" href="<?= h($root . $href) ?>"><?= h($label) ?></a>
+        <?php endforeach; ?>
+        <?php if (($u['source'] ?? '') === SFPC_ACCOUNT_SOURCE): ?>
+          <a class="<?= $nav === 'sfpc_me' ? 'on' : '' ?>" href="<?= h($root) ?>sfpc_me.php">우리 팀</a>
+        <?php endif; ?>
+      <?php endif; ?>
       <?php foreach (JNAV as $k => [$label, $sHref, $aHref, $guestOk, $adminOnly]): ?>
         <?php
+          if ($sfSite && ($k === 'sfpc' || (!$isAdmin && in_array($k, SFPC_STAFF_NAV, true)))) continue;
           if ($k === 'sfpc' && sfpc_setting('sfpc_menu_on') !== '1') continue;
           if (!$u && !$guestOk) continue;
           if ($adminOnly && ($u['role'] ?? '') !== 'admin') continue;
@@ -218,7 +229,7 @@ function page_head(array $o): void {
       <?php endif; ?>
     </nav>
     <?php if ($u): ?>
-      <a class="who" href="<?= h($root) ?>user.php" title="나의 활동"
+      <a class="who" href="<?= h($root) ?><?= (sfpc_site() && !$isAdmin) ? ((($u['source'] ?? '') === SFPC_ACCOUNT_SOURCE) ? 'sfpc_me.php' : 'sfpc_teams.php') : 'user.php' ?>" title="<?= (sfpc_site() && !$isAdmin) ? '내 화면' : '나의 활동' ?>"
          ><b><?= h($u['name'] !== '' ? $u['name'] : $u['login_id']) ?></b></a>
       <div class="util">
         <?php if ($isAdmin): ?>

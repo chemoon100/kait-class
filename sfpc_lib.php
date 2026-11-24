@@ -14,7 +14,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib.php';
 
 /* 표 구조를 바꿀 때마다 1씩 올린다 */
-const SFPC_SCHEMA = 5;
+const SFPC_SCHEMA = 6;
 
 /* 올해 대회. 내년에는 이 값과 설정만 바꾸면 접수를 새로 받을 수 있다. */
 const SFPC_CONTEST = '2026';
@@ -36,11 +36,11 @@ const SFPC_SCHOOLS_SOURCE = '공공데이터포털 전국초중등학교위치�
    track  처음 정해지는 참가 자격. 운영진이 바꿀 수 있다
           (중학생 팀은 '공부하기'를 마치면 정식참가자가 된다) */
 const SFPC_CATS = [
-  'middle'     => ['label' => '중학교',               'kind' => 'student', 'level' => 'middle', 'track' => 'observer'],
-  'general'    => ['label' => '일반고',               'kind' => 'student', 'level' => 'high',   'track' => 'participant'],
-  'special'    => ['label' => '특목/특성화/자사고 등', 'kind' => 'student', 'level' => 'high',   'track' => 'observer'],
-  'teacher'    => ['label' => '교사',                 'kind' => 'teacher', 'level' => 'any',    'track' => 'observer'],
-  'preteacher' => ['label' => '예비교사',             'kind' => 'teacher', 'level' => '',       'track' => 'observer'],
+  'middle'     => ['code' => '01', 'label' => '중학교',               'kind' => 'student', 'level' => 'middle', 'track' => 'observer'],
+  'general'    => ['code' => '02', 'label' => '일반고',               'kind' => 'student', 'level' => 'high',   'track' => 'participant'],
+  'special'    => ['code' => '03', 'label' => '특목/특성화/자사고 등', 'kind' => 'student', 'level' => 'high',   'track' => 'observer'],
+  'teacher'    => ['code' => '04', 'label' => '교사',                 'kind' => 'teacher', 'level' => 'any',    'track' => 'observer'],
+  'preteacher' => ['code' => '05', 'label' => '예비교사',             'kind' => 'teacher', 'level' => '',       'track' => 'observer'],
 ];
 const SFPC_KIND_NAME  = ['student' => '학생 팀', 'teacher' => '교사·예비교사 팀'];
 const SFPC_TRACK_NAME = ['participant' => '정식참가자', 'observer' => '시범참가자'];
@@ -62,6 +62,10 @@ const SFPC_DEFAULTS = [
   'sfpc_schedule'     => '',                     // 첫 화면에 보일 대회 일정 (마크다운)
   'sfpc_privacy'      => '',                     // 개인정보 수집·이용 안내 (마크다운). 비면 기본 문구
   'sfpc_contact'      => 'kaiteachers2013@gmail.com',
+  'sfpc_site'         => '1',                    // 이 사이트 전체가 SFPC 사이트다 — 위쪽 메뉴를 접수 · 공부하기 · 준비하기 · 도전하기 · 스코어보드로 바꾸고,
+                                                 //   KAIT-CLASS 의 기존 메뉴(문제 모음 · 채점 결과 · 수업 · 평가)는 운영진에게만 보인다
+  'sfpc_study_open'   => '0',                    // 공부하기 공개
+  'sfpc_ready_open'   => '0',                    // 준비하기 공개
   'sfpc_menu_on'      => '1',                    // 위쪽 메뉴에 SFPC 보이기
   'sfpc_landing_on'   => '1',                    // 접수 전 · 접수 중에 첫 화면을 SFPC 안내로 (sfpc_landing.php)
   'sfpc_account_open' => '0',                    // 지도교사의 "내 팀" 화면에 팀 계정 보이기 (계정을 나눠 주는 날 켠다)
@@ -189,6 +193,19 @@ if ((int)sfpc_setting('sfpc_schema') !== SFPC_SCHEMA) {
   if (!in_array('avatar', array_column(db()->query("PRAGMA table_info(sfpc_teams)")->fetchAll(PDO::FETCH_ASSOC), 'name'), true)) {
     db()->exec("ALTER TABLE sfpc_teams ADD COLUMN avatar TEXT NOT NULL DEFAULT ''");
   }
+  /* 6 — 독립된 SFPC 사이트로. 처음 한 번만: 사이트 이름을 SFPC 로, KAIT-PLAY 메뉴는 숨기고(기능은 그대로),
+         교육팀 · 문항 제작팀의 운영 계정을 만든다. 비밀번호는 넣지 않는다 — 운영 > 회원에서 정해야 로그인할 수 있다. */
+  if (setting('sfpc_site_init') !== '1') {
+    if (in_array(trim(setting('site_name')), ['', APP_NAME], true)) setting_set('site_name', 'SFPC');
+    setting_set('play_menu', '0');
+    foreach (['sfpcedu' => '교육팀', 'sfpcset' => '문항 제작팀'] as $login => $name) {
+      if (!db()->query("SELECT 1 FROM users WHERE login_id = " . db()->quote($login))->fetchColumn()) {
+        db()->prepare("INSERT INTO users(login_id, pw_hash, name, role, group_id, source, approved, created_at) VALUES(?,?,?,'admin',NULL,'sfpc_staff',1,?)")
+            ->execute([$login, '!', $name, now()]);
+      }
+    }
+    setting_set('sfpc_site_init', '1');
+  }
   /* 학교 목록이 비어 있으면 함께 넣어 둔 목록으로 채운다 — 설치만 하면 학교 찾기가 바로 된다 */
   if ((int)db()->query("SELECT COUNT(*) FROM sfpc_schools")->fetchColumn() === 0 && sfpc_schools_load_bundled() > 0) {
     setting_set('sfpc_schools_at', now());
@@ -264,8 +281,28 @@ function sfpc_phone(string $s): string {
    지도교사에게 이 기능이 보이는 때는 설정 sfpc_account_open 으로 정한다. */
 const SFPC_ACCOUNT_SOURCE = 'sfpc_team';
 const SFPC_PW_MIN = 6;
+/* 팀 계정 이름 = sfpc + 참가 구분 두 자리 + 접수 번호 네 자리 (중학교 3번 팀 → sfpc010003).
+   · sfpc_account_want() — 지금의 참가 구분으로 매긴 이름
+   · sfpc_account_id()   — 실제로 쓰는 이름. 계정을 이미 만들었으면(비밀번호를 정했으면) 그 계정의 이름이고,
+                           아직이면 want 와 같다. 그래서 나눠 주기 전에는 구분을 고치면 이름도 따라가고,
+                           나눠 준 뒤에는 운영진이 "계정 다시 발급"을 눌러야 바뀐다 (sfpc_account_reissue). */
+function sfpc_account_want(array $t): string {
+  return 'sfpc' . (SFPC_CATS[$t['category']]['code'] ?? '00') . str_pad((string)$t['id'], 4, '0', STR_PAD_LEFT);
+}
 function sfpc_account_id(array $t): string {
-  return 'sfpc' . substr((string)$t['contest'], -2) . str_pad((string)$t['id'], 4, '0', STR_PAD_LEFT);
+  $uid = (int)($t['account_user_id'] ?? 0);
+  if ($uid) { $l = db()->query("SELECT login_id FROM users WHERE id = $uid")->fetchColumn(); if ($l !== false) return (string)$l; }
+  return sfpc_account_want($t);
+}
+function sfpc_account_stale(array $t): bool { return sfpc_account_id($t) !== sfpc_account_want($t); }
+/* 계정 이름을 지금의 참가 구분에 맞게 다시 매긴다. 비밀번호 · 캐릭터 · 풀이 기록은 그대로다. 오류 문구를 돌려준다. */
+function sfpc_account_reissue(array $t, array $actor): string {
+  $uid = (int)($t['account_user_id'] ?? 0); $old = sfpc_account_id($t); $new = sfpc_account_want($t);
+  if (!$uid || $old === $new) return '';
+  if (db()->query("SELECT 1 FROM users WHERE login_id = " . db()->quote($new))->fetchColumn()) return '이미 쓰이고 있는 계정 이름입니다. (' . $new . ')';
+  db()->prepare("UPDATE users SET login_id = ? WHERE id = ? AND source = ?")->execute([$new, $uid, SFPC_ACCOUNT_SOURCE]);
+  sfpc_log((int)$t['id'], (int)$t['coach_user_id'], $actor, 'account', '팀 계정 이름을 다시 발급: ' . $old . ' → ' . $new);
+  return '';
 }
 function sfpc_account_open(): bool { return sfpc_setting('sfpc_account_open') === '1'; }
 /* 읽어 주기 쉬운 무작위 비밀번호 — 헷갈리는 글자(0 o 1 l i)는 뺀다 */
@@ -343,6 +380,20 @@ function sfpc_account_sync(int $teamId): void {
   db()->prepare("UPDATE users SET name = ?, approved = ? WHERE id = ? AND source = ?")
       ->execute([$t['team_name'], $t['status'] === 'submitted' ? 1 : 0, $t['account_user_id'], SFPC_ACCOUNT_SOURCE]);
 }
+/* 흔한 이메일 주소 오타 — 가입 화면이 바로 알려 준다 (메일을 실제로 보내 확인하는 기능은 뒤에 붙인다) */
+const SFPC_EMAIL_TYPO = [
+  'gamil.com' => 'gmail.com', 'gmial.com' => 'gmail.com', 'gmai.com' => 'gmail.com', 'gmail.con' => 'gmail.com', 'gmail.co' => 'gmail.com',
+  'gmail.cm' => 'gmail.com', 'gmaill.com' => 'gmail.com', 'gnail.com' => 'gmail.com',
+  'naver.con' => 'naver.com', 'naver.co' => 'naver.com', 'naver.cm' => 'naver.com', 'nvaer.com' => 'naver.com', 'naber.com' => 'naver.com',
+  'naver.net' => 'naver.com', 'navar.com' => 'naver.com', 'never.com' => 'naver.com',
+  'daum.con' => 'daum.net', 'daum.com' => 'daum.net', 'duam.net' => 'daum.net', 'hanmail.com' => 'hanmail.net', 'hanmail.con' => 'hanmail.net',
+  'kakao.con' => 'kakao.com', 'kakao.net' => 'kakao.com',
+];
+function sfpc_email_typo(string $email) {
+  $d = strtolower((string)substr(strrchr($email, '@') ?: '', 1));
+  return isset(SFPC_EMAIL_TYPO[$d]) ? [$d, SFPC_EMAIL_TYPO[$d]] : '';
+}
+
 /* 로그인한 사람이 팀 계정이면 그 팀, 아니면 null */
 function sfpc_my_team(?array $u): ?array {
   if (!$u || ($u['source'] ?? '') !== SFPC_ACCOUNT_SOURCE) return null;
@@ -560,6 +611,27 @@ function sfpc_gate(string $settingKey, string $title, ?array $u): bool {
   return false;
 }
 
+/* ── 독립 SFPC 사이트 ─────────────────────────────
+   sfpc_site 가 켜져 있으면 이 설치 전체가 SFPC 사이트다.
+   · 위쪽 메뉴: 접수 · 공부하기 · 준비하기 · 도전하기 · 스코어보드 (+ 팀 계정에게는 우리 팀)
+   · KAIT-CLASS 의 기존 화면(문제 모음 · 출처 · 채점 결과 · 수업 · 평가)은 운영진만 쓴다.
+     메뉴에서 빼고, 주소를 직접 쳐도 첫 화면으로 돌려보낸다 — 준비 중인 대회 문제가 보이면 안 된다.
+     (공지사항은 대회 공지에 쓰므로 누구에게나 보인다.) */
+function sfpc_site(): bool { return sfpc_setting('sfpc_site') === '1'; }
+const SFPC_NAV = [
+  'sfpc'         => ['접수',       'sfpc.php'],
+  'sfpc_study'   => ['공부하기',   'sfpc_study.php'],
+  'sfpc_ready'   => ['준비하기',   'sfpc_ready.php'],
+  'sfpc_contest' => ['도전하기',   'sfpc_contest.php'],
+  'sfpc_board'   => ['스코어보드', 'sfpc_board.php'],
+];
+const SFPC_STAFF_NAV = ['problems', 'tags', 'results', 'lessons', 'assessments'];   /* 운영진만 */
+function sfpc_site_gate(?array $u, string $nav, string $root = ''): void {
+  if (!sfpc_site() || is_admin($u)) return;
+  $page = basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
+  if (in_array($nav, SFPC_STAFF_NAV, true) || $page === 'user.php') { header('Location: ' . $root . 'index.php'); exit; }
+}
+
 /* 첫 화면(index.php)에 끼우는 알림 띠. 접수 전 · 접수 중에만 나온다. */
 function sfpc_home_banner(): void {
   if (sfpc_setting('sfpc_menu_on') !== '1') return;
@@ -590,6 +662,7 @@ function sfpc_path(string $file): string {
    브라우저에서는 로고를 눌러도 SFPC 안내가 뜨지만, 거기서 이동하기를 누르면 된다.
    접수가 끝나면 자동으로 기존 첫 화면으로 돌아간다. */
 function sfpc_landing_active(): bool {
+  if (sfpc_site()) return sfpc_setting('sfpc_landing_on') === '1';      /* SFPC 사이트에서는 접수가 끝나도 이 화면이 첫 화면이다 */
   return sfpc_setting('sfpc_menu_on') === '1' && sfpc_setting('sfpc_landing_on') === '1'
       && sfpc_apply_state() !== 'closed';
 }
@@ -603,7 +676,9 @@ function sfpc_from_inside(): bool {
 }
 function sfpc_landing_gate(?array $u): void {
   sfpc_char_gate($u);   /* 캐릭터를 만들지 않은 팀 계정은 첫 화면보다 꾸미기가 먼저 */
-  if (!sfpc_landing_active() || isset($_GET['home']) || sfpc_from_inside()) return;
+  if (!sfpc_landing_active()) return;
+  if (sfpc_site()) { if (is_admin($u) && isset($_GET['home'])) return; }       /* SFPC 사이트: 운영진만 ?home=1 로 기존 첫 화면을 본다 */
+  elseif (isset($_GET['home']) || sfpc_from_inside()) return;
   require __DIR__ . '/sfpc_landing.php';
   exit;
 }

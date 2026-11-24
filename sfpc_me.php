@@ -2,7 +2,7 @@
 /* ═══════════════════════════════════════════════
    sfpc_me.php — 우리 팀. 팀 계정으로 로그인하면 처음 오는 화면.
 
-   팀 정보와 대회 일정을 보여 주고, 캐릭터 꾸미기 · 대회 참가 · 스코어보드로 이어진다.
+   팀 정보와 대회 일정을 보여 주고, 캐릭터 꾸미기 · 공부하기 · 준비하기 · 도전하기 · 스코어보드로 이어진다.
    ?team=팀번호 — 운영진이 그 팀의 화면을 본다 (보기 전용).
    ═══════════════════════════════════════════════ */
 declare(strict_types=1);
@@ -23,7 +23,7 @@ $off     = $team['status'] !== 'submitted';
 $sched   = trim(sfpc_setting('sfpc_schedule'));
 [$msg, ] = $viewAs ? ['', ''] : flash_take();
 
-page_head(['title' => '우리 팀', 'root' => '', 'user' => $u, 'nav' => 'sfpc']);
+page_head(['title' => '우리 팀', 'root' => '', 'user' => $u, 'nav' => 'sfpc_me']);
 sfpc_css();
 ?>
 <?php if ($viewAs): ?>
@@ -71,7 +71,9 @@ sfpc_css();
   </div>
 
   <div class="sfpc-me-links">
-    <a href="sfpc_contest.php"><b>대회 참가</b><span><?= sfpc_setting('sfpc_contest_open') === '1' ? '문제 풀러 가기' : '준비 중입니다' ?></span></a>
+    <a href="sfpc_study.php"><b>공부하기</b><span><?= sfpc_setting('sfpc_study_open') === '1' ? '기초 문제 풀기' : '준비 중입니다' ?></span></a>
+    <a href="sfpc_ready.php"><b>준비하기</b><span><?= sfpc_setting('sfpc_ready_open') === '1' ? '모의 대회 해 보기' : '준비 중입니다' ?></span></a>
+    <a href="sfpc_contest.php"><b>도전하기</b><span><?= sfpc_setting('sfpc_contest_open') === '1' ? '본 대회 들어가기' : '준비 중입니다' ?></span></a>
     <a href="sfpc_board.php"><b>스코어보드</b><span><?= sfpc_setting('sfpc_board_open') === '1' ? '순위 보기' : '준비 중입니다' ?></span></a>
   </div>
 

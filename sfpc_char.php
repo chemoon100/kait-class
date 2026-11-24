@@ -25,7 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $first = $team['avatar'] === '';
 $cur = sfpc_char_of($team);
 
-page_head(['title' => '캐릭터 꾸미기', 'root' => '', 'user' => $u, 'nav' => 'sfpc']);
+page_head(['title' => '캐릭터 꾸미기', 'root' => '', 'user' => $u, 'nav' => 'sfpc_me']);
 sfpc_css();
 ?>
 <div class="wrap narrow">

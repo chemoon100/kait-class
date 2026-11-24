@@ -11,13 +11,13 @@ require __DIR__ . '/guard.php';
 require __DIR__ . '/layout.php';
 $u = me();
 
-page_head(['title' => '대회 참가', 'root' => '', 'user' => $u, 'nav' => 'sfpc']);
+page_head(['title' => '도전하기', 'root' => '', 'user' => $u, 'nav' => 'sfpc_contest']);
 sfpc_css();
-if (sfpc_gate('sfpc_contest_open', '대회 참가', $u)):
+if (sfpc_gate('sfpc_contest_open', '도전하기', $u)):
 ?>
 <div class="wrap narrow">
-  <div class="phead"><h1>대회 참가</h1><span class="sub"><?= h(sfpc_setting('sfpc_title')) ?></span></div>
-  <div class="empty">대회 참가 화면을 만드는 중입니다.</div>
+  <div class="phead"><h1>도전하기</h1><span class="sub"><?= h(sfpc_setting('sfpc_title')) ?></span></div>
+  <div class="empty">도전하기(본 대회) 화면을 만드는 중입니다.</div>
 </div>
 <?php
 endif;

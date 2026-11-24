@@ -65,7 +65,7 @@ sfpc_preview_bar();
     <a href="sfpc_me.php" class="k-student">
       <span class="who">우리 팀</span>
       <span class="t">우리 팀 화면</span>
-      <span class="d">팀원과 대회 일정을 보고, 대회 참가 화면과 스코어보드로 갑니다.</span>
+      <span class="d">팀원과 대회 일정을 보고, 공부하기 · 준비하기 · 도전하기로 갑니다.</span>
       <span class="go">우리 팀으로 가기 →</span>
     </a>
     <a href="sfpc_char.php" class="k-teacher">
@@ -149,8 +149,8 @@ sfpc_preview_bar();
         <?php else: ?><p>공부하기 · 준비하기 · 도전하기 일정은 곧 알려 드립니다.</p><?php endif; ?>
       </section>
       <section>
-        <h2>대회 참가와 스코어보드</h2>
-        <p><a href="sfpc_contest.php">대회 참가</a> · <a href="sfpc_board.php">스코어보드</a> 화면은 대회 일정에 맞춰 열립니다.
+        <h2>공부하기 · 준비하기 · 도전하기</h2>
+        <p><a href="sfpc_study.php">공부하기</a>(기초 문제) · <a href="sfpc_ready.php">준비하기</a>(모의 대회) · <a href="sfpc_contest.php">도전하기</a>(본 대회) · <a href="sfpc_board.php">스코어보드</a>는 대회 일정에 맞춰 열립니다.
           <?php if ($contact !== ''): ?><br>문의 <a href="mailto:<?= h($contact) ?>"><?= h($contact) ?></a><?php endif; ?></p>
       </section>
     </div>

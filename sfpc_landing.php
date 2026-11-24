@@ -144,7 +144,15 @@ $site = site_name();
   <div class="lp-top">
     <span class="lp-tag">SFPC://<?= h(SFPC_CONTEST) ?></span>
     <span class="grow"></span>
-    <a class="lp-kc" id="lpKc" href="index.php?home=1"><?= h($site) ?> 이동하기 →</a>
+    <?php /* 오른쪽 위 버튼 — SFPC 사이트에서는 로그인(또는 내 화면)으로, 함께 쓰는 사이트에서는 기존 첫 화면으로 */
+      $lpMe = $u ?? me();
+      if (!sfpc_site())                                        [$kcHref, $kcText] = ['index.php?home=1', $site . ' 이동하기 →'];
+      elseif (!$lpMe)                                          [$kcHref, $kcText] = ['login.php', '로그인 →'];
+      elseif (is_admin($lpMe))                                 [$kcHref, $kcText] = ['admin/sfpc.php', '운영 화면 →'];
+      elseif (($lpMe['source'] ?? '') === SFPC_ACCOUNT_SOURCE) [$kcHref, $kcText] = ['sfpc_me.php', '우리 팀 →'];
+      else                                                     [$kcHref, $kcText] = ['sfpc_teams.php', '내 팀 →'];
+    ?>
+    <a class="lp-kc" id="lpKc" href="<?= h($kcHref) ?>"><?= h($kcText) ?></a>
   </div>
 
   <div class="lp-main">
