@@ -14,7 +14,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib.php';
 
 /* 표 구조를 바꿀 때마다 1씩 올린다 */
-const SFPC_SCHEMA = 6;
+const SFPC_SCHEMA = 7;
 
 /* 올해 대회. 내년에는 이 값과 설정만 바꾸면 접수를 새로 받을 수 있다. */
 const SFPC_CONTEST = '2026';
@@ -64,7 +64,7 @@ const SFPC_DEFAULTS = [
   'sfpc_contact'      => 'kaiteachers2013@gmail.com',
   'sfpc_site'         => '1',                    // 이 사이트 전체가 SFPC 사이트다 — 위쪽 메뉴를 접수 · 공부하기 · 준비하기 · 도전하기 · 스코어보드로 바꾸고,
                                                  //   KAIT-CLASS 의 기존 메뉴(문제 모음 · 채점 결과 · 수업 · 평가)는 운영진에게만 보인다
-  'sfpc_study_open'   => '0',                    // 공부하기 공개
+  'sfpc_study_open'   => '1',                    // 공부하기 공개
   'sfpc_ready_open'   => '0',                    // 준비하기 공개
   'sfpc_menu_on'      => '1',                    // 위쪽 메뉴에 SFPC 보이기
   'sfpc_landing_on'   => '1',                    // 접수 전 · 접수 중에 첫 화면을 SFPC 안내로 (sfpc_landing.php)
@@ -205,6 +205,11 @@ if ((int)sfpc_setting('sfpc_schema') !== SFPC_SCHEMA) {
       }
     }
     setting_set('sfpc_site_init', '1');
+  }
+  /* 7 — 공부하기. 팀이 수료한 때를 남기고, 공부하기는 열어 둔다. */
+  if (!in_array('study_done_at', array_column(db()->query("PRAGMA table_info(sfpc_teams)")->fetchAll(PDO::FETCH_ASSOC), 'name'), true)) {
+    db()->exec("ALTER TABLE sfpc_teams ADD COLUMN study_done_at TEXT NOT NULL DEFAULT ''");
+    setting_set('sfpc_study_open', '1');
   }
   /* 학교 목록이 비어 있으면 함께 넣어 둔 목록으로 채운다 — 설치만 하면 학교 찾기가 바로 된다 */
   if ((int)db()->query("SELECT COUNT(*) FROM sfpc_schools")->fetchColumn() === 0 && sfpc_schools_load_bundled() > 0) {
@@ -471,7 +476,7 @@ function sfpc_char_of(array $t): array {
 
 /* ── 변경 기록 ───────────────────────────────────── */
 const SFPC_LOG_NAME = ['create' => '신청', 'edit' => '수정', 'cancel' => '취소', 'restore' => '다시 접수',
-                       'admin' => '운영진 조정', 'coach' => '지도교사 정보', 'account' => '팀 계정'];
+                       'admin' => '운영진 조정', 'coach' => '지도교사 정보', 'account' => '팀 계정', 'study' => '공부하기'];
 function sfpc_log(?int $teamId, ?int $coachUserId, array $actor, string $action, string $detail): void {
   $admin = is_admin($actor);
   $name  = $admin ? (string)$actor['name'] : (string)(col("SELECT name FROM sfpc_coaches WHERE user_id = ?", [$actor['id']]) ?: $actor['name']);
@@ -626,10 +631,97 @@ const SFPC_NAV = [
   'sfpc_board'   => ['스코어보드', 'sfpc_board.php'],
 ];
 const SFPC_STAFF_NAV = ['problems', 'tags', 'results', 'lessons', 'assessments'];   /* 운영진만 */
-function sfpc_site_gate(?array $u, string $nav, string $root = ''): void {
-  if (!sfpc_site() || is_admin($u)) return;
-  $page = basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
+/* 기존 화면을 막고, 위쪽 메뉴에서 불 켤 항목을 돌려준다.
+   공부하기의 문제는 기존 채점 화면(problem.php?set=…)을 그대로 쓰므로, 공부하기 묶음 안에서는 통과시킨다. */
+function sfpc_site_gate(?array $u, string $nav, string $root = ''): string {
+  if (!sfpc_site()) return $nav;
+  $page  = basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
+  $study = (int)sfpc_setting('sfpc_study_set');
+  $inStudy = $study > 0 && (int)($_GET['set'] ?? 0) === $study && $page === 'problem.php';
+  if ($inStudy) $nav = 'sfpc_study';
+  if (is_admin($u)) return $nav;
+  if ($inStudy) { if (sfpc_setting('sfpc_study_open') === '1') return $nav; header('Location: ' . $root . 'sfpc_study.php'); exit; }
+  if ($page === 'set.php' && $study > 0 && (int)($_GET['id'] ?? 0) === $study) { header('Location: ' . $root . 'sfpc_study.php'); exit; }
+  if ($page === 'results.php' && $u && (int)($_GET['id'] ?? 0) > 0                      /* 자기 제출 하나를 다시 보는 것은 된다 */
+      && (int)col("SELECT user_id FROM submissions WHERE id = ?", [(int)$_GET['id']]) === (int)$u['id']) return 'sfpc_study';
   if (in_array($nav, SFPC_STAFF_NAV, true) || $page === 'user.php') { header('Location: ' . $root . 'index.php'); exit; }
+  return $nav;
+}
+
+/* ── 단계 버튼 (공부하기 · 준비하기 · 도전하기 · 스코어보드) ──
+   첫 화면과 우리 팀 화면에 크게 놓는다. 열려 있는 단계만 테두리에 전류가 흐르고, 나머지는 "준비 중"이다. */
+const SFPC_STAGES = [
+  'study'   => ['공부하기',   'sfpc_study.php',   'STAGE 1', '기초 문제로 몸풀기'],
+  'ready'   => ['준비하기',   'sfpc_ready.php',   'STAGE 2', '시간 재고 모의 대회'],
+  'contest' => ['도전하기',   'sfpc_contest.php', 'STAGE 3', '본 대회'],
+  'board'   => ['스코어보드', 'sfpc_board.php',   'RESULT',  '순위 공개'],
+];
+function sfpc_stage_tiles(string $root = '', string $cls = ''): void {
+  echo '<nav class="sfpc-stages ' . h($cls) . '" aria-label="대회 단계">';
+  foreach (SFPC_STAGES as $k => [$name, $href, $tag, $desc]) {
+    $on = sfpc_setting('sfpc_' . $k . '_open') === '1';
+    echo '<a class="st' . ($on ? ' live' : ' soon') . '" href="' . h($root . $href) . '">'
+       . '<span class="tag">' . h($tag) . '</span><b>' . h($name) . '</b>'
+       . '<span class="d">' . h($on ? $desc : '준비 중') . '</span>'
+       . ($on ? '<i class="zap" aria-hidden="true"></i>' : '') . '</a>';
+  }
+  echo '</nav>';
+}
+
+/* ── 공부하기 ─────────────────────────────────────
+   문제 · 채점은 KAIT-CLASS 의 기존 "수업" 묶음을 그대로 쓴다. 공부하기용 묶음 하나를 자동으로 만들고
+   (누구에게나 열린 수업), 운영진은 수업 화면에서 그 묶음에 문제를 담는다.
+   · 팀 계정이 묶음의 문제를 모두 맞히면 수료 (sfpc_teams.study_done_at). 수료는 한 번 되면 유지된다.
+   · 수료한 중학교 팀은 정식참가자가 된다.
+   · sfpc_study_skip — 수료 조건에서 뺄 문제(problems.id, 쉼표). 문제에 오류가 있을 때 쓴다. */
+function sfpc_study_set(bool $create = true): ?array {
+  $id = (int)sfpc_setting('sfpc_study_set');
+  $s  = $id ? one("SELECT * FROM sets WHERE id = ?", [$id]) : null;
+  if ($s || !$create) return $s;
+  db()->prepare("INSERT INTO sets(set_type, title, start_at, end_at, active, langs, show_diff, visibility, no_paste, created_at)
+                 VALUES('lesson', ?, NULL, NULL, 1, ?, 1, 'all', 0, ?)")
+      ->execute(['SFPC 공부하기', implode(',', array_keys(langs())), now()]);
+  $id = (int)db()->lastInsertId();
+  setting_set('sfpc_study_set', (string)$id);
+  return one("SELECT * FROM sets WHERE id = ?", [$id]);
+}
+function sfpc_study_skip(): array {
+  return array_values(array_filter(array_map('intval', explode(',', sfpc_setting('sfpc_study_skip')))));
+}
+/* 묶음의 문제들 (순서대로) */
+function sfpc_study_problems(): array {
+  $s = sfpc_study_set(false);
+  if (!$s) return [];
+  return all("SELECT p.id, p.prob_no, p.title FROM set_problems sp JOIN problems p ON p.id = sp.problem_id
+              WHERE sp.set_id = ? ORDER BY sp.sort, sp.id", [$s['id']]);
+}
+/* 이 계정이 맞힌 문제 번호(problems.id)들 */
+function sfpc_study_solved(int $userId): array {
+  $s = sfpc_study_set(false);
+  if (!$s || !$userId) return [];
+  return array_map('intval', array_column(all("SELECT DISTINCT s.problem_id FROM submissions s JOIN set_problems sp ON sp.problem_id = s.problem_id AND sp.set_id = ?
+                                               WHERE s.user_id = ? AND s.verdict = 'AC'", [$s['id'], $userId]), 'problem_id'));
+}
+/* 수료 조건을 다 채웠으면 수료 처리한다. 수료했으면(이번이든 전이든) true */
+function sfpc_study_check(array $t): bool {
+  if (($t['study_done_at'] ?? '') !== '') return true;
+  $uid = (int)($t['account_user_id'] ?? 0);
+  if (!$uid || $t['status'] !== 'submitted') return false;
+  $need = array_diff(array_map('intval', array_column(sfpc_study_problems(), 'id')), sfpc_study_skip());
+  if (!$need || array_diff($need, sfpc_study_solved($uid))) return false;
+  sfpc_study_grant($t, null);
+  return true;
+}
+/* 수료 처리 — $actor 가 있으면 운영진이 손으로 한 것 */
+function sfpc_study_grant(array $t, ?array $actor): void {
+  db()->prepare("UPDATE sfpc_teams SET study_done_at = ? WHERE id = ? AND study_done_at = ''")->execute([now(), $t['id']]);
+  $note = '공부하기 수료' . ($actor ? ' (운영진이 처리)' : '');
+  if ($t['category'] === 'middle' && $t['track'] === 'observer') {
+    db()->prepare("UPDATE sfpc_teams SET track = 'participant' WHERE id = ?")->execute([$t['id']]);
+    $note .= ' — 참가 자격: 시범참가자 → 정식참가자';
+  }
+  $who = $actor ?: ['id' => (int)$t['account_user_id'], 'name' => $t['team_name'], 'role' => 'student'];
+  sfpc_log((int)$t['id'], (int)$t['coach_user_id'], $who, 'study', $note);
 }
 
 /* 첫 화면(index.php)에 끼우는 알림 띠. 접수 전 · 접수 중에만 나온다. */

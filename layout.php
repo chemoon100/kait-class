@@ -169,7 +169,7 @@ function page_head(array $o): void {
   $u     = $o['user'] ?? null;
   $nav   = $o['nav'] ?? '';
   sfpc_char_gate($u, $root);
-  sfpc_site_gate($u, (string)$nav, $root);   /* SFPC 사이트에서는 기존 KAIT-CLASS 화면을 운영진만 쓴다 */   /* SFPC 팀 계정은 캐릭터를 만들기 전에는 다른 화면으로 가지 못한다 */
+  $nav = sfpc_site_gate($u, (string)$nav, $root);   /* SFPC 사이트에서는 기존 KAIT-CLASS 화면을 운영진만 쓴다 */   /* SFPC 팀 계정은 캐릭터를 만들기 전에는 다른 화면으로 가지 못한다 */
   $site  = site_name();
   $title = ($o['title'] ?? '') !== '' ? $o['title'] . ' · ' . $site : $site;
   $isAdmin  = ($u['role'] ?? '') === 'admin';
@@ -310,6 +310,17 @@ function page_foot(string $root = ''): void {
     <?php if ($extra !== ''): ?>
       <div class="foot-extra"><?= md($extra) ?></div>
     <?php endif; ?>
+    <?php if (sfpc_site()): /* SFPC 사이트 — 저작권은 KAIT. 바탕이 된 프로그램과 라이선스 표기는 조건이라 한 줄로 남긴다 */ ?>
+    <div class="small foot-app">
+      © <?= h(APP_COPYRIGHT_YEAR) ?> <a href="https://kait.re.kr" target="_blank" rel="noopener">한국정보교사연합회(KAIT)</a>
+      <span class="sep">·</span>
+      <span title="v<?= h(APP_VERSION) ?>"><?= h(APP_NAME) ?> v<?= h(app_version_short()) ?></span>(<?php foreach (APP_OWNERS as $i => $o): if (!str_starts_with($o['url'], 'mailto:')) continue; ?><a href="<?= h($o['url']) ?>" title="메일 보내기"><?= h($o['name']) ?></a><?php endforeach; ?>)를 바탕으로 만들었습니다
+      <span class="sep">·</span>
+      <a href="<?= h(APP_LICENSE_URL) ?>" target="_blank" rel="noopener" title="<?= h(APP_LICENSE_NAME) ?>">비상업 라이선스</a>
+      <span class="sep">·</span>
+      소스 <a href="<?= h(APP_REPO) ?>" target="_blank" rel="noopener"><?= h(preg_replace('#^https?://#', '', APP_REPO)) ?></a>
+    </div>
+    <?php else: ?>
     <div class="small foot-app">
       <span title="v<?= h(APP_VERSION) ?>"><?= h(APP_NAME) ?> v<?= h(app_version_short()) ?></span>
       <span class="sep">·</span>
@@ -320,6 +331,7 @@ function page_foot(string $root = ''): void {
       <span class="sep">·</span>
       소스 <a href="<?= h(APP_REPO) ?>" target="_blank" rel="noopener"><?= h(preg_replace('#^https?://#', '', APP_REPO)) ?></a>
     </div>
+    <?php endif; ?>
     <div class="small foot-lic">
       글꼴 <a href="https://github.com/orioncactus/pretendard" target="_blank" rel="noopener">Pretendard</a> (SIL OFL 1.1)
       · <a href="https://github.com/quiple/galmuri" target="_blank" rel="noopener">Galmuri</a> (SIL OFL 1.1)

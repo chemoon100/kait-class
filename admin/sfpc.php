@@ -14,7 +14,7 @@ require_once __DIR__ . '/../guard.php';
 require_once __DIR__ . '/../layout.php';
 $me = need_admin('../');
 
-const SFPC_TABS = ['summary' => '접수 현황', 'teams' => '팀 목록', 'coaches' => '지도교사', 'log' => '변경 기록',
+const SFPC_TABS = ['summary' => '접수 현황', 'teams' => '팀 목록', 'coaches' => '지도교사', 'study' => '공부하기', 'log' => '변경 기록',
                   'schools' => '학교 목록', 'settings' => '설정'];
 const SFPC_COACH_ID_RE = '/^[A-Za-z][A-Za-z0-9_.-]{3,19}$/';
 $tab = (string)($_GET['tab'] ?? 'summary');
@@ -283,6 +283,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $_SESSION['flash'] = ['msg' => $name . ' 선생님의 계정을 만들었습니다. 아이디와 비밀번호를 본인에게 알려 주세요.', 'err' => ''];
     header('Location: sfpc.php?tab=coaches&q=' . rawurlencode($id));
     exit;
+  }
+
+  /* 공부하기 — 수료 조건에서 문제 빼기/넣기, 팀을 손으로 수료 처리 · 취소 */
+  if ($act === 'study_skip') {
+    $pid = (int)($_POST['pid'] ?? 0); $skip = sfpc_study_skip();
+    $skip = in_array($pid, $skip, true) ? array_values(array_diff($skip, [$pid])) : array_merge($skip, [$pid]);
+    setting_set('sfpc_study_skip', implode(',', $skip));
+    redirect_with('수료 조건을 바꿨습니다. 이미 수료한 팀은 그대로 수료입니다.');
+  }
+  if ($act === 'study_grant' || $act === 'study_revoke') {
+    $t = sfpc_team((int)($_POST['id'] ?? 0));
+    if (!$t) redirect_with('', '팀을 찾지 못했습니다.');
+    if ($act === 'study_grant') { if ($t['study_done_at'] === '') sfpc_study_grant($t, $me); redirect_with('"' . $t['team_name'] . '" 팀을 수료 처리했습니다.'); }
+    db()->prepare("UPDATE sfpc_teams SET study_done_at = '' WHERE id = ?")->execute([$t['id']]);
+    sfpc_log((int)$t['id'], (int)$t['coach_user_id'], $me, 'study', '공부하기 수료를 취소 (운영진). 참가 자격은 바꾸지 않았습니다 — 필요하면 팀 관리에서 고칩니다.');
+    redirect_with('"' . $t['team_name'] . '" 팀의 수료를 취소했습니다. 참가 자격은 그대로이니 필요하면 팀 목록에서 고쳐 주세요.');
   }
 
   if ($act === 'settings') {
@@ -630,6 +646,66 @@ sfpc_css('../');
       <button class="btn primary" type="submit">계정 만들기</button>
     </form>
   </div>
+
+<?php elseif ($tab === 'study'):
+  $sset = sfpc_study_set(); $probs = sfpc_study_problems(); $skip = sfpc_study_skip();
+  $needIds = array_diff(array_map('intval', array_column($probs, 'id')), $skip);
+  $steams = all("SELECT t.* FROM sfpc_teams t WHERE t.contest = ? AND t.status = 'submitted' ORDER BY t.id", [SFPC_CONTEST]);
+  $solvedBy = [];
+  foreach (all("SELECT s.user_id, COUNT(DISTINCT s.problem_id) n FROM submissions s JOIN set_problems sp ON sp.problem_id = s.problem_id AND sp.set_id = ?
+                WHERE s.verdict = 'AC' GROUP BY s.user_id", [$sset['id']]) as $r) $solvedBy[(int)$r['user_id']] = (int)$r['n'];
+  $acBy = [];
+  foreach (all("SELECT s.problem_id, COUNT(DISTINCT s.user_id) n FROM submissions s JOIN users u ON u.id = s.user_id AND u.source = ?
+                WHERE s.verdict = 'AC' GROUP BY s.problem_id", [SFPC_ACCOUNT_SOURCE]) as $r) $acBy[(int)$r['problem_id']] = (int)$r['n'];
+  $doneN = count(array_filter($steams, fn($t) => $t['study_done_at'] !== ''));
+?>
+  <div class="note info">공부하기 문제는 기존 "수업" 묶음 <b><?= h($sset['title']) ?></b> 에 담습니다.
+    <a class="btn sm" href="set.php?id=<?= (int)$sset['id'] ?>" style="margin-left:8px">묶음에 문제 넣기 · 순서 바꾸기</a>
+    <a class="btn sm" href="problems.php">문제 만들기</a>
+    <a class="btn sm" href="../sfpc_study.php" target="_blank" rel="noopener">공부하기 화면 보기</a>
+    <br><span class="small">팀 계정이 이 묶음의 문제를 <b>모두</b> 맞히면 자동으로 수료되고, 수료한 중학교 팀은 정식참가자가 됩니다. 공개 여부는 설정 탭의 "공부하기 공개"입니다 (지금 <?= sfpc_setting('sfpc_study_open') === '1' ? '공개' : '준비 중' ?>).</span></div>
+
+  <h2 style="font-size:17px; margin:22px 0 10px">문제 <?= count($probs) ?>개 <span class="small muted" style="font-weight:400">· 수료에 필요한 문제 <?= count($needIds) ?>개</span></h2>
+  <?php if (!$probs): ?>
+    <div class="empty">아직 묶음에 담긴 문제가 없습니다. 문제가 하나도 없으면 아무 팀도 수료되지 않습니다.</div>
+  <?php else: ?>
+  <div class="tablewrap"><table class="list">
+    <thead><tr><th>순서</th><th>문제</th><th class="num">맞힌 팀</th><th>수료 조건</th></tr></thead>
+    <tbody>
+    <?php foreach ($probs as $i => $p): $off = in_array((int)$p['id'], $skip, true); ?>
+      <tr>
+        <td class="num"><?= $i + 1 ?></td>
+        <td><a href="../problem.php?no=<?= (int)$p['prob_no'] ?>&amp;set=<?= (int)$sset['id'] ?>"><?= h($p['title']) ?></a> <span class="small muted">#<?= (int)$p['prob_no'] ?></span></td>
+        <td class="num"><?= (int)($acBy[(int)$p['id']] ?? 0) ?></td>
+        <td><form method="post" style="display:inline"><?= sfpc_csrf_field() ?><input type="hidden" name="act" value="study_skip"><input type="hidden" name="pid" value="<?= (int)$p['id'] ?>">
+          <?= $off ? '<span class="sfpc-flag">조건에서 뺌</span>' : '필요' ?>
+          <button class="btn sm" style="margin-left:8px"><?= $off ? '다시 넣기' : '조건에서 빼기' ?></button></form></td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table></div>
+  <?php endif; ?>
+
+  <h2 style="font-size:17px; margin:26px 0 10px">팀별 진행 <span class="small muted" style="font-weight:400">· 수료 <?= $doneN ?> / <?= count($steams) ?>팀</span></h2>
+  <?php if (!$steams): ?><div class="empty">접수한 팀이 없습니다.</div><?php else: ?>
+  <div class="tablewrap"><table class="list">
+    <thead><tr><th>접수번호</th><th>팀</th><th>구분</th><th class="num">맞힌 문제</th><th>수료</th><th></th></tr></thead>
+    <tbody>
+    <?php foreach ($steams as $t): $n = (int)($solvedBy[(int)$t['account_user_id']] ?? 0); $done = $t['study_done_at'] !== ''; ?>
+      <tr>
+        <td><span class="sfpc-no"><?= h(sfpc_team_no($t)) ?></span></td>
+        <td><b><?= h($t['team_name']) ?></b> <span class="small muted"><?= h($t['school_name']) ?></span></td>
+        <td><?= h(SFPC_CATS[$t['category']]['label'] ?? '') ?> · <?= h(SFPC_TRACK_NAME[$t['track']] ?? '') ?></td>
+        <td class="num"><?= (int)$t['account_user_id'] ? $n . ' / ' . count($probs) : '<span class="muted small">계정 없음</span>' ?></td>
+        <td><?= $done ? '<span class="badge ok">수료</span> <span class="small muted">' . h(substr($t['study_done_at'], 5, 11)) . '</span>' : '<span class="muted">—</span>' ?></td>
+        <td><form method="post" style="display:inline"><?= sfpc_csrf_field() ?><input type="hidden" name="id" value="<?= (int)$t['id'] ?>">
+          <?php if ($done): ?><button class="btn sm" name="act" value="study_revoke" onclick="return confirm('이 팀의 수료를 취소할까요?')">수료 취소</button>
+          <?php else: ?><button class="btn sm" name="act" value="study_grant" onclick="return confirm('이 팀을 수료 처리할까요?<?= $t['category'] === 'middle' ? '\\n중학교 팀이라 정식참가자로 바뀝니다.' : '' ?>')">수료 처리</button><?php endif; ?></form></td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table></div>
+  <?php endif; ?>
 
 <?php elseif ($tab === 'log'):
   /* ── 변경 기록 ── */

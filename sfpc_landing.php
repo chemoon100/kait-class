@@ -65,7 +65,7 @@ $site = site_name();
 }
 .lp{
   --bg:#140A24; --violet:#7F77DD; --violet-soft:#CECBF6; --teal:#5DCAA5; --teal-soft:#9FE1CB; --teal-ink:#04342C;
-  position:relative; min-height:100vh; min-height:100svh; overflow:hidden;
+  position:relative; min-height:100vh; min-height:100svh; overflow:hidden;   /* 내용이 길면 상자가 함께 늘어난다 */
   background-color:var(--bg); color:#fff;
   /* 격자는 그림이 아니라 배경으로 깐다 — 움직이지 않는다 */
   background-image:
@@ -154,6 +154,8 @@ $site = site_name();
     ?>
     <a class="lp-kc" id="lpKc" href="<?= h($kcHref) ?>"><?= h($kcText) ?></a>
   </div>
+
+  <?php if (sfpc_site()) sfpc_stage_tiles('', 'dark'); /* 단계 버튼 — 열린 단계만 테두리에 전류가 흐른다 */ ?>
 
   <div class="lp-main">
     <div class="lp-left">

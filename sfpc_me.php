@@ -70,12 +70,7 @@ sfpc_css();
     </section>
   </div>
 
-  <div class="sfpc-me-links">
-    <a href="sfpc_study.php"><b>공부하기</b><span><?= sfpc_setting('sfpc_study_open') === '1' ? '기초 문제 풀기' : '준비 중입니다' ?></span></a>
-    <a href="sfpc_ready.php"><b>준비하기</b><span><?= sfpc_setting('sfpc_ready_open') === '1' ? '모의 대회 해 보기' : '준비 중입니다' ?></span></a>
-    <a href="sfpc_contest.php"><b>도전하기</b><span><?= sfpc_setting('sfpc_contest_open') === '1' ? '본 대회 들어가기' : '준비 중입니다' ?></span></a>
-    <a href="sfpc_board.php"><b>스코어보드</b><span><?= sfpc_setting('sfpc_board_open') === '1' ? '순위 보기' : '준비 중입니다' ?></span></a>
-  </div>
+  <?php sfpc_stage_tiles('', 'light'); ?>
 
   <?php if ($sched !== ''): ?>
     <section class="sfpc-me-card" style="margin-top:14px"><h2>대회 일정</h2><div class="md"><?= md($sched) ?></div></section>

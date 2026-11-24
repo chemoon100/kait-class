@@ -239,3 +239,67 @@ table.sfpc-pvlinks td a:hover{text-decoration:none; background:var(--b50)}
 .sfpc-acc-f .rand-note{flex:1 0 100%; font-size:13px; color:#7A5200; background:#FFF7E0; border:1px solid #E0A800; border-radius:8px; padding:7px 10px}
 .field .sfpc-pw, .sfpc-form .sfpc-pw{display:flex; width:100%}
 .sfpc-pw input{flex:1 1 auto; min-width:0; width:100% !important}
+
+/* ── 단계 버튼 (공부하기 · 준비하기 · 도전하기 · 스코어보드) ──
+   열린 단계(.live)는 테두리를 따라 빛이 돈다. 준비 중(.soon)은 흐리게 둔다. */
+@property --sfa{syntax:'<angle>'; inherits:false; initial-value:0deg}
+@keyframes sfpc-zap{to{--sfa:360deg}}
+.sfpc-stages{display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:16px; margin:0 0 18px}
+.sfpc-stages .st{position:relative; display:flex; flex-direction:column; justify-content:center; gap:6px; min-height:128px; padding:20px 24px;
+                 border-radius:16px; border:2px solid transparent; text-decoration:none}
+.sfpc-stages .st .tag{font-size:12px; font-weight:700; letter-spacing:.12em}
+.sfpc-stages .st b{font-size:32px; line-height:1.1; font-weight:800; letter-spacing:-.02em; white-space:nowrap}
+.sfpc-stages .st .d{font-size:14px}
+.sfpc-stages .st.live::before, .sfpc-stages .st.live .zap{content:""; position:absolute; inset:-2px; border-radius:inherit; padding:3px; pointer-events:none;
+  background:conic-gradient(from var(--sfa), transparent 0 62%, #5DCAA5 74%, #EAFBF4 84%, #FAC775 90%, transparent 96%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask-composite:exclude;
+  animation:sfpc-zap 2.6s linear infinite}
+.sfpc-stages .st.live .zap{animation-delay:-1.3s; opacity:.85}
+.sfpc-stages .st.live:hover::before, .sfpc-stages .st.live:hover .zap{animation-duration:1.1s}
+/* 어두운 바탕 (첫 화면) */
+.sfpc-stages.dark{position:relative; padding:26px 40px 0; margin:0}
+.sfpc-stages.dark .st{background:rgba(20,10,36,.88); border-color:#3C3489; color:#fff}
+.sfpc-stages.dark .st .tag{color:#7F77DD}
+.sfpc-stages.dark .st .d{color:#AFA9EC; font-size:12px}
+.sfpc-stages.dark .st.live{border-color:#1D9E75; box-shadow:0 0 26px rgba(93,202,165,.28)}
+.sfpc-stages.dark .st.live .tag, .sfpc-stages.dark .st.live .d{color:#5DCAA5}
+.sfpc-stages.dark .st.soon{color:#6E66A8; border-style:dashed}
+.sfpc-stages.dark .st.soon .tag{color:#4A437A}
+.sfpc-stages.dark .st.soon .d{color:#6E66A8}
+.sfpc-stages.dark .st:hover{border-color:#fff}
+/* 밝은 바탕 (우리 팀) */
+.sfpc-stages.light{margin-top:14px}
+.sfpc-stages.light .st{background:#fff; border-color:var(--line); color:var(--b900)}
+.sfpc-stages.light .st b{font-size:24px}
+.sfpc-stages.light .st{min-height:104px; padding:16px 18px}
+.sfpc-stages.light .st .tag{color:var(--b400)}
+.sfpc-stages.light .st .d{color:var(--ink-3)}
+.sfpc-stages.light .st.live{border-color:#1D9E75; background:#F3FBF8}
+.sfpc-stages.light .st.live .tag, .sfpc-stages.light .st.live .d{color:#0F6E56}
+.sfpc-stages.light .st.soon{color:var(--ink-3); background:var(--b25); border-style:dashed}
+.sfpc-stages.light .st:hover{border-color:var(--b400)}
+@media (max-width:860px){ .sfpc-stages{grid-template-columns:1fr 1fr; gap:10px} .sfpc-stages.dark{padding:16px 20px 0}
+  .sfpc-stages .st{min-height:92px; padding:14px 16px} .sfpc-stages .st b{font-size:22px} .sfpc-stages.light .st b{font-size:20px} }
+@media (prefers-reduced-motion: reduce){ .sfpc-stages .st.live::before, .sfpc-stages .st.live .zap{animation:none} }
+
+/* ── 공부하기 ─────────────────────────────────── */
+.sfpc-st-lead{margin:0 0 16px; font-size:15px; color:var(--ink-2)}
+.sfpc-st-prog{border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:16px; background:#fff}
+.sfpc-st-prog.done{border-color:#1D9E75; background:#F3FBF8}
+.sfpc-st-prog .top{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px}
+.sfpc-st-prog .top b{font-size:16px; color:var(--b900)}
+.sfpc-st-prog .top .n{margin-left:auto; font:700 20px var(--mono); color:var(--b700)}
+.sfpc-st-prog .bar{height:12px; border-radius:6px; background:var(--b50, #EEF2FB); overflow:hidden}
+.sfpc-st-prog .bar i{display:block; height:100%; background:#1D9E75; border-radius:6px; transition:width .4s}
+.sfpc-st-list{list-style:none; margin:0; padding:0; display:grid; grid-template-columns:1fr 1fr; gap:8px}
+.sfpc-st-list a{display:flex; align-items:center; gap:12px; padding:11px 14px; border:1px solid var(--line); border-radius:10px; background:#fff; text-decoration:none; color:var(--ink)}
+.sfpc-st-list a:hover{border-color:var(--b400)}
+.sfpc-st-list .no{flex:0 0 34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font:700 14px var(--mono); background:var(--b50, #EEF2FB); color:var(--b700)}
+.sfpc-st-list .t{flex:1; min-width:0; font-size:15px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.sfpc-st-list .t em{font-style:normal; font-size:12px; color:var(--ink-3); margin-left:6px}
+.sfpc-st-list .s{font-size:13px; color:var(--b500); white-space:nowrap}
+.sfpc-st-list li.ok a{border-color:#9FE1CB; background:#F3FBF8}
+.sfpc-st-list li.ok .no{background:#1D9E75; color:#fff}
+.sfpc-st-list li.ok .s{color:#0F6E56; font-weight:700}
+@media (max-width:640px){ .sfpc-st-list{grid-template-columns:1fr} }
+.sfpc-stages .st .tag{background:none; padding:0; border:0; border-radius:0; display:block}
