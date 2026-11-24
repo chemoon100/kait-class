@@ -2,7 +2,7 @@
 /* ═══════════════════════════════════════════════
    admin/sfpc.php — 운영 > SFPC
 
-     ?tab=summary   접수 현황 (지역 · 참가 구분별 집계, 현장 참가 인원과 상의 사이즈)
+     ?tab=summary   접수 현황 (지역 · 참가 구분별 집계, 오프라인 참가 인원과 상의 사이즈)
      ?tab=teams     팀 목록 (찾기 · 참가 자격 · 반려 · 메모 · 내려받기 · 신청 내용 고치기 · 팀별 변경 기록)
      ?tab=coaches   지도교사 (정보 고치기 · 비밀번호 다시 정하기 · 계정 만들기 · 대신 팀 넣기)
      ?tab=log       변경 기록 (누가 언제 무엇을 바꿨는지)
@@ -81,13 +81,13 @@ if (isset($_GET['export'])) {
   [, $where, $args] = sfpc_admin_filter();
   $teams = sfpc_admin_teams($where, $args);
   $stamp = date('Ymd-Hi');
-  $way = fn($t) => (int)$t['onsite'] ? '현장' : '온라인';
+  $way = fn($t) => (int)$t['onsite'] ? '오프라인' : '온라인';
   if ($_GET['export'] === 'members') {
     $rows = [];
     foreach ($teams as $t) foreach ($t['members'] as $m) {
       $rows[] = [sfpc_team_no($t), SFPC_STATUS_NAME[$t['status']] ?? '', $t['region'], SFPC_CATS[$t['category']]['label'] ?? '',
                  SFPC_TRACK_NAME[$t['track']] ?? '', $way($t), $t['school_name'], $t['team_name'],
-                 $m['seq'], $m['name'], $m['grade'] ?: '', $m['shirt'], $t['coach_name'], $t['coach_phone']];
+                 $m['seq'], $m['name'], $m['grade'] ?: '', (int)$t['onsite'] ? $m['shirt'] : '', $t['coach_name'], $t['coach_phone']];
     }
     sfpc_csv_out("sfpc-members-$stamp.csv",
       ['접수번호','상태','지역','참가구분','참가자격','참가방식','학교','팀명','순번','이름','학년','상의사이즈','지도교사','연락처'], $rows);
@@ -298,16 +298,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$r) redirect_with('', '기록을 찾지 못했습니다.');
     db()->prepare("UPDATE sfpc_mash SET removed_at = ? WHERE id = ?")->execute([$r['removed_at'] === '' ? now() : '', $r['id']]);
     $t = sfpc_team((int)$r['team_id']);
-    if ($t) sfpc_log((int)$t['id'], (int)$t['coach_user_id'], $me, 'study', '연타 기록(보스 ' . $r['boss'] . ' · ' . $r['round'] . '판 · ' . $r['cnt'] . '회)을 ' . ($r['removed_at'] === '' ? '지움' : '되돌림'));
+    if ($t) sfpc_log((int)$t['id'], (int)$t['coach_user_id'], $me, 'study', '연타 기록(보스 ' . $r['boss'] . ' · ' . $r['cnt'] . '회)을 ' . ($r['removed_at'] === '' ? '지움' : '되돌림'));
     redirect_with($r['removed_at'] === '' ? '기록을 지웠습니다. 순위에서 빠집니다. 같은 자리에서 되돌릴 수 있습니다.' : '기록을 되돌렸습니다.');
   }
   if ($act === 'mash_again') {            /* 그 판을 아예 없애 다시 할 수 있게 한다 */
     $r = one("SELECT * FROM sfpc_mash WHERE id = ?", [(int)($_POST['mid'] ?? 0)]);
     if (!$r) redirect_with('', '기록을 찾지 못했습니다.');
-    db()->prepare("DELETE FROM sfpc_mash WHERE team_id = ? AND boss = ? AND round >= ?")->execute([$r['team_id'], $r['boss'], $r['round']]);
+    /* 넘어간 표시로 바꾼다 — 길은 열린 채로 두고(이미 다음 월드를 풀고 있을 수 있다) 그 보스만 다시 도전할 수 있게 */
+    db()->prepare("UPDATE sfpc_mash SET skip = 1, cnt = 0, removed_at = '' WHERE id = ?")->execute([$r['id']]);
     $t = sfpc_team((int)$r['team_id']);
-    if ($t) sfpc_log((int)$t['id'], (int)$t['coach_user_id'], $me, 'study', '연타 기록(보스 ' . $r['boss'] . ' · ' . $r['round'] . '판 · ' . $r['cnt'] . '회)을 없애 다시 할 수 있게 함');
-    redirect_with('그 판을 없앴습니다. 팀이 다시 할 수 있습니다.');
+    if ($t) sfpc_log((int)$t['id'], (int)$t['coach_user_id'], $me, 'study', '연타 기록(보스 ' . $r['boss'] . ' · ' . $r['cnt'] . '회)을 없애 다시 할 수 있게 함');
+    redirect_with('그 기록을 없앴습니다. 팀이 지도에서 그 보스에게 다시 도전할 수 있습니다.');
   }
   if ($act === 'study_conf') {
     setting_set('sfpc_boss_every', (string)max(1, min(50, (int)($_POST['boss_every'] ?? 10))));
@@ -342,6 +343,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     setting_set('sfpc_host_region', $host);
     setting_set('sfpc_apply_from', substr($from, 0, 16));
     setting_set('sfpc_apply_to', substr($to, 0, 16));
+    $sd = str_replace('T', ' ', trim((string)($_POST['shirt_due'] ?? '')));
+    setting_set('sfpc_shirt_due', ($sd !== '' && sfpc_ts($sd)) ? substr($sd, 0, 16) : '');
     setting_set('sfpc_schedule', trim((string)($_POST['schedule'] ?? '')));
     setting_set('sfpc_privacy', trim((string)($_POST['privacy'] ?? '')));
     setting_set('sfpc_contact', sfpc_clean((string)($_POST['contact'] ?? ''), 100));
@@ -437,7 +440,8 @@ sfpc_css('../');
     <div class="stat"><div class="k">접수 팀</div><div class="v"><?= $tot['teams'] ?></div><div class="s">지도교사 <?= $coaches ?>명</div></div>
     <div class="stat"><div class="k">참가 인원</div><div class="v"><?= $tot['people'] ?></div><div class="s">팀원 기준</div></div>
     <div class="stat"><div class="k">정식 · 시범</div><div class="v"><?= $tot['participant'] ?> · <?= $tot['observer'] ?></div><div class="s">팀 수</div></div>
-    <div class="stat"><div class="k"><?= h($host) ?> 현장 참가</div><div class="v"><?= $tot['onsite_p'] ?></div><div class="s"><?= $tot['onsite_t'] ?>팀</div></div>
+    <?php $hostOnline = (int)col("SELECT COUNT(*) FROM sfpc_teams WHERE contest = ? AND status = 'submitted' AND kind = 'student' AND region = ? AND onsite = 0", [SFPC_CONTEST, $host]); ?>
+    <div class="stat"><div class="k"><?= h($host) ?> 오프라인 참가</div><div class="v"><?= $tot['onsite_p'] ?></div><div class="s"><?= $tot['onsite_t'] ?>팀 · <?= h($host) ?> 학생 팀 중 온라인 <?= $hostOnline ?>팀</div></div>
   </div>
   <?php if ($tot['manual']): ?>
     <p class="small" style="margin:10px 0 0">학교를 직접 입력한 팀이 <b><?= $tot['manual'] ?></b>곳 있습니다.
@@ -454,7 +458,7 @@ sfpc_css('../');
       <?php $colSum = []; foreach (SFPC_REGIONS as $r):
         $rowSum = [0, 0]; ?>
         <tr class="<?= $r === $host ? 'host' : '' ?>">
-          <td><?= h($r) ?><?= $r === $host ? ' <span class="sfpc-flag">현장</span>' : '' ?></td>
+          <td><?= h($r) ?><?= $r === $host ? ' <span class="sfpc-flag">개최지</span>' : '' ?></td>
           <?php foreach (SFPC_CATS as $k => $c): $g = $grid[$r][$k] ?? null;
             if ($g) { $rowSum = [$rowSum[0] + $g[0], $rowSum[1] + $g[1]];
                       $colSum[$k] = [($colSum[$k][0] ?? 0) + $g[0], ($colSum[$k][1] ?? 0) + $g[1]]; } ?>
@@ -471,10 +475,11 @@ sfpc_css('../');
   </div>
 
   <div class="sec">
-    <h2><?= h($host) ?> 현장 참가 — 상의 사이즈</h2>
-    <p class="desc">현장 참가 팀의 팀원 기준입니다. 지도교사는 들어 있지 않습니다.</p>
+    <h2><?= h($host) ?> 오프라인 참가 — 상의 사이즈</h2>
+    <p class="desc">오프라인(대회장) 참가를 고른 <?= h($host) ?> 학생 팀의 팀원 기준입니다. 지도교사와 온라인 팀은 들어 있지 않습니다.
+      <?php $sd = sfpc_setting('sfpc_shirt_due'); ?><?= $sd !== '' ? '티셔츠 조사 마감: <b>' . h($sd) . '</b>' . (sfpc_shirt_closed() ? ' (마감됨 — 이 뒤에 오프라인으로 바꾼 팀은 변경 기록에 표시됩니다)' : '') : '티셔츠 조사 마감일은 설정 탭에서 정합니다.' ?></p>
     <?php if (!$tot['onsite_p']): ?>
-      <div class="empty" style="padding:28px 20px">아직 현장 참가 팀이 없습니다.</div>
+      <div class="empty" style="padding:28px 20px">아직 오프라인 참가 팀이 없습니다.</div>
     <?php else: ?>
       <div class="scrollx" style="display:inline-block"><table class="sfpc-grid" style="min-width:0">
         <thead><tr><th>사이즈</th><?php foreach (SFPC_SHIRTS as $s): ?><th><?= h($s) ?></th><?php endforeach; ?><th>합계</th></tr></thead>
@@ -513,7 +518,7 @@ sfpc_css('../');
       <option value="">조건 없음</option>
       <option value="participant"<?= $f['flag'] === 'participant' ? ' selected' : '' ?>>정식참가자</option>
       <option value="observer"<?= $f['flag'] === 'observer' ? ' selected' : '' ?>>시범참가자</option>
-      <option value="onsite"<?= $f['flag'] === 'onsite' ? ' selected' : '' ?>>현장 참가</option>
+      <option value="onsite"<?= $f['flag'] === 'onsite' ? ' selected' : '' ?>>오프라인 참가</option>
       <option value="manual"<?= $f['flag'] === 'manual' ? ' selected' : '' ?>>학교 직접 입력</option>
     </select>
     <input type="text" name="q" value="<?= h($f['q']) ?>" placeholder="팀명 · 학교 · 이름">
@@ -534,10 +539,10 @@ sfpc_css('../');
         <tr>
           <td class="num"><?= h(sfpc_team_no($t)) ?><div class="small muted" style="font-family:var(--sans); font-weight:400"><?= h(substr((string)$t['created_at'], 5, 11)) ?></div></td>
           <td><b><?= h($t['team_name']) ?></b>
-            <div class="sfpc-mem"><?= h(implode(', ', array_map(fn($m) => $m['name'] . ($m['grade'] ? ' ' . $m['grade'] : '') . ($m['shirt'] !== '' ? ' ' . $m['shirt'] : ''), $t['members']))) ?></div></td>
+            <div class="sfpc-mem"><?= h(implode(', ', array_map(fn($m) => $m['name'] . ($m['grade'] ? ' ' . $m['grade'] : '') . ((int)$t['onsite'] && $m['shirt'] !== '' ? ' ' . $m['shirt'] : ''), $t['members']))) ?></div></td>
           <td><?= h($t['region']) ?> · <?= h($t['school_name']) ?>
             <?php if ((int)$t['school_manual'] && $t['category'] !== 'preteacher'): ?><span class="sfpc-flag" title="학교 목록에서 고르지 않고 직접 입력했습니다">직접 입력</span><?php endif; ?>
-            <?php if ((int)$t['onsite']): ?><span class="sfpc-flag" style="background:var(--b100); color:var(--b700)">현장</span><?php endif; ?></td>
+            <?php if ((int)$t['onsite']): ?><span class="sfpc-flag" style="background:var(--b100); color:var(--b700)">오프라인</span><?php endif; ?></td>
           <td class="small"><?= h(SFPC_CATS[$t['category']]['label'] ?? '') ?><div class="muted"><?= h(SFPC_TRACK_NAME[$t['track']] ?? '') ?></div></td>
           <td class="small"><?= h((string)$t['coach_name']) ?> <span class="muted">(<?= h((string)$t['coach_login']) ?>)</span><div class="muted"><?= h((string)$t['coach_phone']) ?></div></td>
           <td><?= sfpc_status_badge($t) ?><?php if ($t['admin_memo'] !== ''): ?><div class="small muted" style="max-width:160px"><?= h($t['admin_memo']) ?></div><?php endif; ?></td>
@@ -698,7 +703,7 @@ sfpc_css('../');
     <label class="small">문제 <input type="number" name="boss_every" min="1" max="50" value="<?= sfpc_boss_every() ?>" style="width:70px"> 개마다 보스</label>
     <label class="small">연타 한 판 <input type="number" name="mash_sec" min="5" max="60" value="<?= sfpc_mash_sec() ?>" style="width:70px"> 초</label>
     <button class="btn sm">저장</button>
-    <span class="small muted">지금 보스 <?= sfpc_boss_count() ?>마리 · 맞힌 문제가 (보스 번호 × 간격)개가 되면 열립니다</span>
+    <span class="small muted">지금 보스 <?= sfpc_boss_count() ?>마리 · 보스는 한 판, <?= SFPC_MASH_MIN ?>번 이하로 끝나면 무효(다시 도전) · 보스를 지나야 다음 월드가 열립니다</span>
   </form>
 
   <h2 style="font-size:17px; margin:22px 0 10px">문제 <?= count($probs) ?>개 <span class="small muted" style="font-weight:400">· 수료에 필요한 문제 <?= count($needIds) ?>개</span></h2>
@@ -745,8 +750,8 @@ sfpc_css('../');
   </table></div>
   <?php endif; ?>
 
-  <?php $mrows = all("SELECT m.*, t.team_name FROM sfpc_mash m JOIN sfpc_teams t ON t.id = m.team_id WHERE m.contest = ? ORDER BY m.id DESC LIMIT 300", [SFPC_CONTEST]); ?>
-  <h2 style="font-size:17px; margin:26px 0 10px">연타 기록 <span class="small muted" style="font-weight:400">· 최근 <?= count($mrows) ?>판 · <a href="../sfpc_rank.php" target="_blank" rel="noopener">순위 보기</a></span></h2>
+  <?php $mrows = all("SELECT m.*, t.team_name FROM sfpc_mash m JOIN sfpc_teams t ON t.id = m.team_id WHERE m.contest = ? AND m.round = 1 ORDER BY m.started_at DESC, m.id DESC LIMIT 300", [SFPC_CONTEST]); ?>
+  <h2 style="font-size:17px; margin:26px 0 10px">연타 기록 <span class="small muted" style="font-weight:400">· 최근 <?= count($mrows) ?>건 · <a href="../sfpc_rank.php" target="_blank" rel="noopener">순위 보기</a></span></h2>
   <?php if (!$mrows): ?><div class="empty">아직 기록이 없습니다.</div><?php else: ?>
   <div class="tablewrap"><table class="list">
     <thead><tr><th>때</th><th>팀</th><th>보스</th><th class="num">횟수</th><th></th></tr></thead>
@@ -755,11 +760,13 @@ sfpc_css('../');
       <tr<?= $gone ? ' style="opacity:.55"' : '' ?>>
         <td class="small"><?= h(substr($m['started_at'], 5, 11)) ?></td>
         <td><b><?= h($m['team_name']) ?></b></td>
-        <td>보스 <?= (int)$m['boss'] ?> · <?= (int)$m['round'] ?>판</td>
-        <td class="num"><?= $m['ended_at'] === '' ? '<span class="muted">진행 중</span>' : (int)$m['cnt'] ?><?= $gone ? ' <span class="sfpc-flag">지움</span>' : '' ?></td>
+        <td>보스 <?= (int)$m['boss'] ?></td>
+        <td class="num"><?= (int)$m['skip'] ? '<span class="muted">넘어감 (0점)</span>' : ($m['ended_at'] === '' ? '<span class="muted">아직 (시작만 함)</span>' : (int)$m['cnt']) ?><?= $gone ? ' <span class="sfpc-flag">지움</span>' : '' ?></td>
         <td><form method="post" style="display:inline"><?= sfpc_csrf_field() ?><input type="hidden" name="mid" value="<?= (int)$m['id'] ?>">
+          <?php if (!(int)$m['skip'] && $m['ended_at'] !== ''): ?>
           <button class="btn sm" name="act" value="mash_toggle"><?= $gone ? '되돌리기' : '기록 지우기' ?></button>
-          <button class="btn sm" name="act" value="mash_again" onclick="return confirm('이 판을 없애고 팀이 다시 하게 할까요?\n이 보스의 뒤 판도 함께 없어집니다. 되돌릴 수 없습니다.')">다시 하게 하기</button></form></td>
+          <button class="btn sm" name="act" value="mash_again" onclick="return confirm('이 기록을 없애고 팀이 이 보스에게 다시 도전하게 할까요?\n되돌릴 수 없습니다.')">다시 하게 하기</button>
+          <?php endif; ?></form></td>
       </tr>
     <?php endforeach; ?>
     </tbody>
@@ -872,7 +879,7 @@ sfpc_css('../');
       <div class="row">
         <div class="field"><label for="st">대회 이름</label>
           <input type="text" id="st" name="title" maxlength="40" value="<?= h(sfpc_setting('sfpc_title')) ?>"></div>
-        <div class="field" style="max-width:200px"><label for="sh">개최 지역 <span class="hint" style="display:inline">현장 참가</span></label>
+        <div class="field" style="max-width:200px"><label for="sh">개최 지역 <span class="hint" style="display:inline">이 지역 학생 팀만 오프라인 선택</span></label>
           <select id="sh" name="host_region"><?php foreach (SFPC_REGIONS as $r): ?>
             <option<?= sfpc_setting('sfpc_host_region') === $r ? ' selected' : '' ?>><?= h($r) ?></option><?php endforeach; ?></select></div>
       </div>
@@ -882,6 +889,9 @@ sfpc_css('../');
         <div class="field"><label for="se">접수 마감</label>
           <input type="datetime-local" id="se" name="apply_to" value="<?= h($dt('sfpc_apply_to')) ?>"></div>
       </div>
+      <div class="field" style="max-width:340px"><label for="sd">티셔츠 조사 마감 <span class="hint" style="display:inline">비워 두면 마감 없음</span></label>
+        <input type="datetime-local" id="sd" name="shirt_due" value="<?= h($dt('sfpc_shirt_due')) ?>">
+        <span class="hint">이 뒤에 오프라인으로 접수하거나 바꾸는 팀에게 "티셔츠를 받지 못할 수 있다"고 안내합니다. 변경 자체는 막지 않습니다.</span></div>
       <div class="field"><label for="sc">문의 이메일</label>
         <input type="text" id="sc" name="contact" maxlength="100" value="<?= h(sfpc_setting('sfpc_contact')) ?>" style="max-width:340px"></div>
     </fieldset>

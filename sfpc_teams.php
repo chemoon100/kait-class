@@ -47,6 +47,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$viewAs) {
   }
   if (!$canEdit)                                         redirect_with('', '접수 기간이 아니어서 바꿀 수 없습니다.');
   if ($act === 'cancel' && $t['status'] === 'submitted') {
+    /* 실수로 누르지 않게 — "취소"라고 직접 적어야 한다 */
+    if (trim((string)($_POST['word'] ?? '')) !== '취소') redirect_with('', '접수를 취소하려면 입력 칸에 "취소"라고 적어 주세요. 취소되지 않았습니다.');
     db()->prepare("UPDATE sfpc_teams SET status = 'canceled', updated_at = ? WHERE id = ?")->execute([now(), $t['id']]);
     sfpc_log((int)$t['id'], (int)$u['id'], $u, 'cancel', '지도교사가 신청을 취소');
     sfpc_account_sync((int)$t['id']);
@@ -115,10 +117,7 @@ sfpc_css();
         <span class="grow"></span>
         <?php if ($canEdit && $t['status'] === 'submitted'): ?>
           <a class="btn sm" href="sfpc_team.php?id=<?= (int)$t['id'] ?>">수정</a>
-          <form method="post" onsubmit="return confirm('이 팀의 신청을 취소할까요?\n접수 기간에는 다시 접수할 수 있습니다.')">
-            <?= sfpc_csrf_field() ?><input type="hidden" name="id" value="<?= (int)$t['id'] ?>">
-            <button class="btn sm danger" name="act" value="cancel">신청 취소</button>
-          </form>
+          <button class="btn sm danger js-cancel-open" type="button" aria-expanded="false" aria-controls="cancel-<?= (int)$t['id'] ?>">접수 취소</button>
         <?php elseif ($canEdit && $t['status'] === 'canceled'): ?>
           <form method="post">
             <?= sfpc_csrf_field() ?><input type="hidden" name="id" value="<?= (int)$t['id'] ?>">
@@ -126,14 +125,26 @@ sfpc_css();
           </form>
         <?php endif; ?>
       </div>
+      <?php if ($canEdit && $t['status'] === 'submitted'): ?>
+        <form method="post" class="sfpc-cancel sfpc-hide" id="cancel-<?= (int)$t['id'] ?>">
+          <?= sfpc_csrf_field() ?><input type="hidden" name="id" value="<?= (int)$t['id'] ?>"><input type="hidden" name="act" value="cancel">
+          <p><b>"<?= h($t['team_name']) ?>" 팀의 접수를 취소합니다.</b> 팀 계정으로 로그인할 수 없게 됩니다. 접수 기간 안에는 "다시 접수"로 같은 접수 번호 그대로 되살릴 수 있고, 기간이 지나면 운영진만 되살릴 수 있습니다.</p>
+          <div class="r">
+            <label for="cw-<?= (int)$t['id'] ?>" class="small">정말 취소하려면 <b>취소</b> 라고 입력하세요</label>
+            <input type="text" id="cw-<?= (int)$t['id'] ?>" name="word" maxlength="4" autocomplete="off" class="js-cancel-word">
+            <button class="btn sm danger" disabled>접수 취소하기</button>
+            <button class="btn sm js-cancel-close" type="button">그만두기</button>
+          </div>
+        </form>
+      <?php endif; ?>
       <p class="meta">
         <?= h($t['region']) ?> · <?= h(SFPC_CATS[$t['category']]['label'] ?? $t['category']) ?> · <?= h($t['school_name']) ?>
         · <?= h(SFPC_TRACK_NAME[$t['track']] ?? '') ?>
-        · <?= (int)$t['onsite'] ? '현장 참가' : '온라인 참가' ?>
+        · <?= (int)$t['onsite'] ? '오프라인(대회장) 참가' : '온라인 참가' ?>
       </p>
       <p class="mem">
         <?php foreach ($members as $m): ?>
-          <span><?= h($m['name']) ?><?= $m['grade'] ? ' <span class="muted small">' . (int)$m['grade'] . '학년</span>' : '' ?><?= $m['shirt'] !== '' ? ' <span class="muted small">' . h($m['shirt']) . '</span>' : '' ?></span>
+          <span><?= h($m['name']) ?><?= $m['grade'] ? ' <span class="muted small">' . (int)$m['grade'] . '학년</span>' : '' ?><?= ((int)$t['onsite'] && $m['shirt'] !== '') ? ' <span class="muted small">' . h($m['shirt']) . '</span>' : '' ?></span>
         <?php endforeach; ?>
       </p>
       <?php if ($t['status'] === 'rejected' && $t['admin_memo'] !== ''): ?>
@@ -183,4 +194,16 @@ sfpc_css();
   <?php endif; ?>
 </div>
 <?php sfpc_pw_eye(); ?>
+<script>
+(function () {
+  'use strict';
+  document.querySelectorAll('.js-cancel-open').forEach(function (b) {
+    var box = document.getElementById(b.getAttribute('aria-controls')), inp = box.querySelector('.js-cancel-word'), go = box.querySelector('button.danger');
+    function set(on) { box.classList.toggle('sfpc-hide', !on); b.setAttribute('aria-expanded', on ? 'true' : 'false'); if (on) inp.focus(); else { inp.value = ''; go.disabled = true; } }
+    b.addEventListener('click', function () { set(box.classList.contains('sfpc-hide')); });
+    box.querySelector('.js-cancel-close').addEventListener('click', function () { set(false); b.focus(); });
+    inp.addEventListener('input', function () { go.disabled = inp.value.trim() !== '취소'; });
+  });
+})();
+</script>
 <?php page_foot(); ?>

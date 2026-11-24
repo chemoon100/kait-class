@@ -37,7 +37,7 @@ sfpc_css();
       <p class="tag"><?= h(sfpc_setting('sfpc_title')) ?></p>
       <h1><?= h($team['team_name']) ?></h1>
       <p class="sub"><?= h($team['school_name']) ?> · <?= h($team['region']) ?> · <?= h(SFPC_CATS[$team['category']]['label'] ?? '') ?>
-        · <?= (int)$team['onsite'] ? '현장 참가' : '온라인 참가' ?></p>
+        · <?= (int)$team['onsite'] ? '오프라인(대회장) 참가' : '온라인 참가' ?></p>
     </div>
     <div class="ids">
       <span>팀 계정 <code><?= h(sfpc_account_id($team)) ?></code></span>

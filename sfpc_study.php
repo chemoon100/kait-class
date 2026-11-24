@@ -4,7 +4,9 @@
 
    · 문제와 채점은 KAIT-CLASS 의 수업 묶음 (sfpc_lib.php 의 "공부하기"). 칸을 열면 기존 채점 화면이 나온다.
    · 문제 sfpc_boss_every 개마다 보스 칸이 있다. 한 월드 = 그 문제들 + 보스.
-   · 어느 칸이든 자유롭게 갈 수 있다. 방향키는 화면에 보이는 방향 그대로 움직인다.
+   · 보스는 관문이다. 보스를 지나야(싸우거나 넘어가야) 다음 월드로 간다. 그 안에서는 자유롭게 다닌다.
+   · 방향키는 화면에 보이는 방향 그대로 움직인다.
+   · 지도 위의 공지 상자 — 새 공지가 있으면 깜빡인다. 누르면 그 자리에서 읽는다.
    · ?view=list — 같은 문제를 단순한 목록으로.
    팀 계정만 들어온다 (운영진은 확인용으로 들어올 수 있다).
    ═══════════════════════════════════════════════ */
@@ -15,8 +17,12 @@ $u = me();
 $team = sfpc_my_team($u);
 $open = sfpc_setting('sfpc_study_open') === '1' || (is_admin($u) && sfpc_preview() !== 'guest');
 
-/* 방금 수료했으면 축하 화면으로 */
-if ($open && $team && sfpc_study_check($team) && (int)($_SESSION['sfpc_grad'] ?? 0) === (int)$team['id']) { header('Location: sfpc_grad.php'); exit; }
+/* 방금 수료했으면 축하 화면으로 — 다만 싸울 보스가 남아 있으면 보스가 먼저다 (보스를 끝내면 그 화면에서 축하로 간다) */
+if ($open && $team && sfpc_study_check($team) && (int)($_SESSION['sfpc_grad'] ?? 0) === (int)$team['id']) {
+  $ev = sfpc_boss_every(); $ps = sfpc_boss_passed((int)$team['id']);
+  $ns = count(array_intersect(array_map('intval', array_column(sfpc_study_problems(), 'id')), sfpc_study_solved((int)$u['id'])));
+  if (!($ps < sfpc_boss_count() && $ns >= ($ps + 1) * $ev)) { header('Location: sfpc_grad.php'); exit; }
+}
 
 page_head(['title' => '공부하기', 'root' => '', 'user' => $u, 'nav' => 'sfpc_study']);
 sfpc_css();
@@ -51,6 +57,9 @@ $state  = set_state($set);
 $pct    = $need ? (int)floor($got * 100 / count($need)) : 0;
 $every  = sfpc_boss_every();
 $mash   = $team ? sfpc_mash_rows((int)$team['id']) : [];
+$passed = $team ? sfpc_boss_passed((int)$team['id']) : PHP_INT_MAX;   /* 운영진 미리 보기는 모두 열려 있다 */
+$notices = all("SELECT id, title, body, pinned, created_at FROM notices WHERE active = 1 ORDER BY pinned DESC, id DESC LIMIT 8");
+$noticeTop = $notices ? max(array_map(fn($n) => (int)$n['id'], $notices)) : 0;
 $char   = $team ? sfpc_char_of($team) : sfpc_char_default((int)$u['id']);
 
 if (($_GET['view'] ?? '') === 'list'): ?>
@@ -65,12 +74,13 @@ if (($_GET['view'] ?? '') === 'list'): ?>
     <div class="empty">문제를 준비하고 있습니다. 곧 올라옵니다.</div>
   <?php else: ?>
     <ol class="sfpc-st-list">
-      <?php foreach ($probs as $i => $p): $ok = in_array((int)$p['id'], $solved, true); $off = in_array((int)$p['id'], $skip, true); ?>
-        <li class="<?= $ok ? 'ok' : '' ?>">
-          <a href="<?= $u ? 'problem.php?no=' . (int)$p['prob_no'] . '&amp;set=' . (int)$set['id'] : 'login.php?next=' . rawurlencode('sfpc_study.php') ?>">
+      <?php foreach ($probs as $i => $p): $ok = in_array((int)$p['id'], $solved, true); $off = in_array((int)$p['id'], $skip, true);
+        $lock = min(intdiv($i, $every), sfpc_boss_count()) > $passed; ?>
+        <li class="<?= $ok ? 'ok' : '' ?><?= $lock ? ' lock' : '' ?>">
+          <a href="<?= $lock ? 'sfpc_study.php' : 'problem.php?no=' . (int)$p['prob_no'] . '&amp;set=' . (int)$set['id'] ?>">
             <span class="no"><?= $i + 1 ?></span>
             <span class="t"><?= h($p['title']) ?><?= $off ? ' <em>수료 조건에서 빠진 문제</em>' : '' ?></span>
-            <span class="s"><?= $ok ? '맞았습니다' : ($u ? '풀기 →' : '') ?></span>
+            <span class="s"><?= $ok ? '맞았습니다' : ($lock ? '앞의 보스를 지나야 열립니다' : '풀기 →') ?></span>
           </a>
         </li>
       <?php endforeach; ?>
@@ -80,16 +90,18 @@ if (($_GET['view'] ?? '') === 'list'): ?>
 <?php page_foot(); exit; endif;
 
 /* 지도에 놓을 칸들 — 문제와 보스를 길 순서대로 */
-$nodes = []; $bossNo = 0;
+$nodes = []; $bossNo = 0; $nBoss = sfpc_boss_count();
 foreach ($probs as $i => $p) {
   $nodes[] = ['t' => 'p', 'n' => $i + 1, 'title' => $p['title'], 'ok' => in_array((int)$p['id'], $solved, true),
+              'lock' => min(intdiv($i, $every), $nBoss) > $passed,
               'href' => 'problem.php?no=' . (int)$p['prob_no'] . '&set=' . (int)$set['id']];
   if (($i + 1) % $every === 0) {
     $bossNo++; [$kind, $name] = sfpc_boss_kind($bossNo);
-    $r = $mash[$bossNo] ?? [];
-    $nodes[] = ['t' => 'b', 'n' => $bossNo, 'kind' => $kind, 'name' => $name, 'open' => $nSolved >= $bossNo * $every,
-                'needMore' => max(0, $bossNo * $every - $nSolved), 'played' => count($r),
-                'sum' => array_sum(array_map(fn($x) => $x['removed_at'] === '' ? (int)$x['cnt'] : 0, $r)), 'href' => 'sfpc_boss.php?b=' . $bossNo];
+    $r = $mash[$bossNo] ?? null; $st = $team ? sfpc_boss_state($r) : '';
+    $nodes[] = ['t' => 'b', 'n' => $bossNo, 'kind' => $kind, 'name' => $name,
+                'open' => $nSolved >= $bossNo * $every && $passed >= $bossNo - 1,
+                'needMore' => max(0, $bossNo * $every - $nSolved), 'st' => $st,
+                'cnt' => ($st === 'done' && $r['removed_at'] === '') ? (int)$r['cnt'] : 0, 'href' => 'sfpc_boss.php?b=' . $bossNo];
   }
 }
 ?>
@@ -109,6 +121,11 @@ foreach ($probs as $i => $p) {
   <?php if (!$probs): ?>
     <div class="sfpc-world-empty">문제를 준비하고 있습니다. 곧 올라옵니다.</div>
   <?php else: ?>
+  <button type="button" class="sfpc-nbox" id="nbox" data-top="<?= $noticeTop ?>" data-key="sfpc_notice_seen_<?= (int)$u['id'] ?>" aria-haspopup="dialog">
+    <span class="ic" aria-hidden="true">!</span>
+    <span class="tx"><b>공지사항</b><i id="nboxSub"><?= $notices ? h($notices[0]['title']) : '아직 공지가 없습니다' ?></i></span>
+    <em id="nboxNew" hidden>새 공지를 확인하세요!</em>
+  </button>
   <div class="sfpc-world-map">
     <canvas id="wm" tabindex="0" aria-label="공부하기 지도. 방향키로 칸을 옮기고 Enter 로 엽니다. 목록으로 보려면 위쪽의 목록을 누르세요."></canvas>
   </div>
@@ -119,6 +136,39 @@ foreach ($probs as $i => $p) {
   <p class="sfpc-world-help">방향키 ← ↑ ↓ → 로 이동 · Enter 로 열기 · 칸을 눌러도 됩니다</p>
   <?php endif; ?>
 </div>
+<div class="sfpc-nmodal" id="nmodal" role="dialog" aria-modal="true" aria-labelledby="nmodalH" hidden>
+  <div class="box">
+    <div class="h"><b id="nmodalH">공지사항</b><button type="button" id="nmodalX" aria-label="닫기">닫기 ✕</button></div>
+    <div class="list">
+      <?php if (!$notices): ?><p class="none">아직 공지가 없습니다.</p><?php endif; ?>
+      <?php foreach ($notices as $n): ?>
+        <article data-id="<?= (int)$n['id'] ?>">
+          <h3><?= !empty($n['pinned']) ? '<span>고정</span>' : '' ?><?= h($n['title']) ?></h3>
+          <time><?= h(substr((string)$n['created_at'], 0, 16)) ?></time>
+          <div class="md"><?= md((string)$n['body']) ?></div>
+        </article>
+      <?php endforeach; ?>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var box = document.getElementById('nbox'), modal = document.getElementById('nmodal'); if (!box) return;
+  var top = parseInt(box.dataset.top, 10) || 0, key = box.dataset.key, seen = 0;
+  try { seen = parseInt(localStorage.getItem(key) || '0', 10) || 0; } catch (e) {}
+  function mark() {
+    var fresh = top > seen; box.classList.toggle('new', fresh); document.getElementById('nboxNew').hidden = !fresh;
+    modal.querySelectorAll('article').forEach(function (a) { a.classList.toggle('new', parseInt(a.dataset.id, 10) > seen); });
+  }
+  function close() { modal.hidden = true; seen = top; try { localStorage.setItem(key, String(top)); } catch (e) {} mark(); var c = document.getElementById('wm'); (c || box).focus(); }
+  box.addEventListener('click', function () { modal.hidden = false; document.getElementById('nmodalX').focus(); });
+  document.getElementById('nmodalX').addEventListener('click', close);
+  modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) close(); });
+  mark();
+})();
+</script>
 <?php if ($probs): ?>
 <script src="<?= asset('sfpc_char.js') ?>"></script>
 <script src="<?= asset('sfpc_boss.js') ?>"></script>
@@ -139,21 +189,27 @@ foreach ($probs as $i => $p) {
     n.x = b % 2 === 0 ? x0 + c * gap : x0 + (PER - 1 - c) * gap; n.y = TOP + b * BAND + 96; n.band = b;
   });
 
-  var cur = parseInt(sessionStorage.getItem(KEY) || '-1', 10);
-  if (!(cur >= 0 && cur < NODES.length)) { cur = 0; for (var i = 0; i < NODES.length; i++) if (NODES[i].t === 'p' && !NODES[i].ok) { cur = i; break; } }
-  var pos = { x: NODES[cur].x, y: NODES[cur].y }, queue = [], dir = 1, tk = 0, puffs = [], moving = false;
+  /* 관문 — 아직 지나지 않은 첫 보스까지만 갈 수 있다 */
+  var MAX = NODES.length - 1, CALL = -1;
+  for (var q = 0; q < NODES.length; q++) if (NODES[q].t === 'b' && NODES[q].st === '') { MAX = q; if (NODES[q].open) CALL = q; break; }
+  var cur = -1; try { cur = parseInt(sessionStorage.getItem(KEY) || '-1', 10); } catch (e) {}
+  if (!(cur >= 0 && cur <= MAX)) { cur = 0; for (var i = 0; i <= MAX; i++) if (NODES[i].t === 'p' && !NODES[i].ok) { cur = i; break; } }
+  if (CALL >= 0) cur = CALL;                                             /* 보스가 기다리고 있으면 그 앞에 세운다 */
+  var blocked = 0, pos = { x: NODES[cur].x, y: NODES[cur].y }, queue = [], dir = 1, tk = 0, puffs = [], moving = false;
 
   function dirOf(a, b) { var dx = b.x - a.x, dy = b.y - a.y; return Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 'ArrowRight' : 'ArrowLeft') : (dy > 0 ? 'ArrowDown' : 'ArrowUp'); }
-  function neighbors(i) { var o = {}; if (i + 1 < NODES.length) o[dirOf(NODES[i], NODES[i + 1])] = i + 1; if (i > 0) { var k = dirOf(NODES[i], NODES[i - 1]); if (!(k in o)) o[k] = i - 1; } return o; }
-  function goTo(i) { queue = []; var s = cur, st = i > s ? 1 : -1; for (var k = s + st; st > 0 ? k <= i : k >= i; k += st) queue.push(k); }
+  function neighbors(i) { var o = {}; if (i + 1 <= MAX) o[dirOf(NODES[i], NODES[i + 1])] = i + 1; if (i > 0) { var k = dirOf(NODES[i], NODES[i - 1]); if (!(k in o)) o[k] = i - 1; } return o; }
+  function goTo(i) { if (i > MAX) { i = MAX; blocked = 90; } queue = []; if (i === cur) return; var s = cur, st = i > s ? 1 : -1; for (var k = s + st; st > 0 ? k <= i : k >= i; k += st) queue.push(k); }
   function setCur(i) { cur = i; try { sessionStorage.setItem(KEY, String(i)); } catch (e) {} info(); follow(); }
 
   var tEl = document.getElementById('wmTitle'), sEl = document.getElementById('wmSub'), goEl = document.getElementById('wmGo');
   function info() {
     var n = NODES[cur];
     if (n.t === 'p') { tEl.textContent = n.n + '번 · ' + n.title; sEl.textContent = n.ok ? '맞혔습니다' : '아직 풀지 않았습니다'; goEl.textContent = n.ok ? '다시 보기 →' : '문제 풀기 →'; goEl.href = n.href; goEl.className = 'go'; }
-    else if (!n.open) { tEl.textContent = 'BOSS ' + n.n + ' · ???'; sEl.textContent = '문제를 ' + n.needMore + '개 더 맞히면 정체가 드러납니다'; goEl.textContent = '잠겨 있음'; goEl.removeAttribute('href'); goEl.className = 'go off'; }
-    else { tEl.textContent = 'BOSS ' + n.n + ' · ' + n.name; sEl.textContent = n.played >= 2 ? '연타 두 판 완료 · 합계 ' + n.sum + '회' : (n.played === 1 ? '한 판 남았습니다 · 지금까지 ' + n.sum + '회' : '스페이스 연타로 싸웁니다 (두 판)'); goEl.textContent = n.played >= 2 ? '기록 보기 →' : '보스에게 도전 →'; goEl.href = n.href; goEl.className = 'go boss'; }
+    else if (!n.open) { tEl.textContent = 'BOSS ' + n.n + ' · ???'; sEl.textContent = '이 월드의 문제를 ' + n.needMore + '개 더 맞히면 정체가 드러납니다. 보스를 지나야 다음 월드로 갑니다.'; goEl.textContent = '잠겨 있음'; goEl.removeAttribute('href'); goEl.className = 'go off'; }
+    else if (n.st === 'done') { tEl.textContent = 'BOSS ' + n.n + ' · ' + n.name; sEl.textContent = '물리쳤습니다 · ' + n.cnt + '회'; goEl.textContent = '기록 보기 →'; goEl.href = n.href; goEl.className = 'go boss'; }
+    else if (n.st === 'skip') { tEl.textContent = 'BOSS ' + n.n + ' · ' + n.name; sEl.textContent = '넘어간 보스입니다 (0점). 지금 도전하면 기록이 남습니다.'; goEl.textContent = '보스에게 도전 →'; goEl.href = n.href; goEl.className = 'go boss'; }
+    else { tEl.textContent = '보스 등장! · ' + n.name; sEl.textContent = '스페이스 연타 한 판. 이 보스를 지나야 다음 월드로 갈 수 있습니다.'; goEl.textContent = '보스에게 도전 →'; goEl.href = n.href; goEl.className = 'go boss call'; }
   }
   function follow() {
     var r = cv.getBoundingClientRect(), y = r.top + (NODES[cur].y / H) * r.height;
@@ -164,18 +220,22 @@ foreach ($probs as $i => $p) {
     var x = n.x, y = n.y;
     if (n.t === 'p') {
       var s = 46;
+      if (n.lock) g.globalAlpha = .35;
       g.fillStyle = n.ok ? '#0F6E56' : '#1D1238'; g.fillRect(x - s / 2 - 4, y - s / 2 + 4, s + 8, s);          /* 받침 */
       g.fillStyle = n.ok ? '#5DCAA5' : '#26215C'; g.fillRect(x - s / 2, y - s / 2, s, s);
       g.fillStyle = n.ok ? '#9FE1CB' : '#3C3489'; g.fillRect(x - s / 2, y - s / 2, s, 4);
       g.fillStyle = n.ok ? '#04342C' : '#AFA9EC'; g.font = '700 18px Galmuri11, monospace'; g.textAlign = 'center'; g.fillText(String(n.n), x, y + 7);
       if (n.ok) { g.fillStyle = '#FAC775'; g.fillRect(x + 12, y - 30, 6, 6); g.fillRect(x + 18, y - 36, 6, 6); g.fillRect(x + 6, y - 36, 6, 6); }  /* 깃발 같은 반짝임 */
+      g.globalAlpha = 1;
     } else {
       var P = 4, bx = x - 8 * P, by = y - 10 * P - 6;
       g.fillStyle = n.open ? '#412402' : '#0C0618'; g.fillRect(x - 40, y + 20, 80, 8);
       g.fillStyle = n.open ? '#BA7517' : '#1D1238'; g.fillRect(x - 34, y + 14, 68, 8);
-      SfpcBoss.draw(g, n.kind, bx, by + (still || !n.open ? 0 : Math.round(Math.sin(tk / 20 + i) * 2)), P, tk + i * 7, { sil: !n.open, down: n.played >= 2 });
+      SfpcBoss.draw(g, n.kind, bx, by + (still || !n.open ? 0 : Math.round(Math.sin(tk / 20 + i) * 2)), P, tk + i * 7, { sil: !n.open, down: n.st === 'done' });
       g.font = '700 12px Galmuri11, monospace'; g.textAlign = 'center'; g.fillStyle = n.open ? '#FAC775' : '#6E66A8';
-      g.fillText(n.open ? (n.played >= 2 ? n.sum + '회' : 'BOSS') : '???', x, y + 46);
+      g.fillText(n.open ? (n.st === 'done' ? n.cnt + '회' : (n.st === 'skip' ? '미도전' : 'BOSS')) : '???', x, y + 46);
+      if (n.open && n.st === '' && (still || Math.floor(tk / 24) % 2)) { g.font = '700 16px Galmuri11, monospace'; g.fillStyle = '#E24B4A'; g.fillText('보스 등장!', x, y - 62); }
+      if (i === MAX && blocked > 0) { blocked--; g.font = '700 13px Galmuri11, monospace'; g.fillStyle = '#FAC775'; g.fillText('보스를 지나야 갈 수 있습니다', x, y + 66); }
     }
   }
   function frame() {

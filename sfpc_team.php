@@ -57,6 +57,7 @@ $in = [
   'school_name' => $team['school_name'] ?? '',
   'manual'      => $team ? (int)$team['school_manual'] === 1 : false,
   'team_name'   => $team['team_name'] ?? '',
+  'way'         => $team ? ((int)$team['onsite'] ? 'off' : 'on') : '',   /* 참가 방식: 'off' 오프라인(대회장) · 'on' 온라인 */
   'members'     => [],
 ];
 if ($team) {
@@ -74,6 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $in['school_name'] = sfpc_clean((string)($_POST['school_name'] ?? ''), 40);
   $in['manual']      = !empty($_POST['school_manual']);
   $in['team_name']   = sfpc_clean((string)($_POST['team_name'] ?? ''), 20);
+  $in['way']         = (string)($_POST['way'] ?? '');
   $names  = (array)($_POST['m_name'] ?? []);
   $grades = (array)($_POST['m_grade'] ?? []);
   $shirts = (array)($_POST['m_shirt'] ?? []);
@@ -90,7 +92,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if (!in_array($in['region'], SFPC_REGIONS, true)) $errs[] = '지역을 고르세요.';
   if (!isset($cats[$in['category']]))               $errs[] = '참가 구분을 고르세요.';
   $cat    = $cats[$in['category']] ?? null;
-  $onsite = sfpc_is_onsite($in['region']);
+  /* 온라인 / 오프라인은 개최 지역의 학생 팀만 고른다. 나머지는 언제나 온라인이고 티셔츠도 없다. */
+  $canOn  = sfpc_can_onsite($kind, $in['region']);
+  if ($canOn && !in_array($in['way'], ['on', 'off'], true)) $errs[] = '참가 방식(온라인 · 오프라인)을 고르세요.';
+  $onsite = $canOn && $in['way'] === 'off';
+  $in['onsite'] = $onsite ? 1 : 0;
 
   /* 학교 — 목록에서 골랐으면 그 학교의 이름을 쓴다 (화면에서 바꿔 보낸 이름은 믿지 않는다) */
   $school = null;
@@ -136,7 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if (!$errs) {
     $manual = $in['school_id'] > 0 ? 0 : 1;
     $oldMembers = $team ? sfpc_team_members((int)$team['id']) : [];
-    $newId = tx(function (PDO $d) use ($team, $ownerId, $byAdmin, $kind, $in, $cat, $onsite, $manual, $members) {
+    $newId = tx(function (PDO $d) use ($team, $ownerId, $byAdmin, $kind, $in, $cat, $onsite, $canOn, $manual, $members) {
       /* 동의한 때 — 지도교사가 저장할 때만 새로 적는다. 운영진이 고칠 때는 그대로 두고,
          운영진이 대신 넣은 팀은 비워 둔다 (동의를 화면에서 받지 않았다는 표시). */
       if ($team) {
@@ -158,7 +164,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       }
       $ins = $d->prepare("INSERT INTO sfpc_members(team_id, seq, name, grade, shirt) VALUES(?,?,?,?,?)");
       foreach ($members as $i => $m) {
-        $ins->execute([$tid, $i + 1, $m['name'], $kind === 'student' ? $m['grade'] : null, $onsite ? $m['shirt'] : '']);
+        /* 사이즈는 오프라인일 때만 쓰지만, 온라인으로 바꿔도 적어 둔 값은 남긴다 (다시 오프라인으로 돌아오면 그대로) */
+        $ins->execute([$tid, $i + 1, $m['name'], $kind === 'student' ? $m['grade'] : null, ($canOn && in_array($m['shirt'], SFPC_SHIRTS, true)) ? $m['shirt'] : '']);
       }
       return $tid;
     });
@@ -166,12 +173,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $newMembers = array_map(fn($m) => ['name' => $m['name'], 'grade' => $kind === 'student' ? $m['grade'] : 0,
                                        'shirt' => $onsite ? $m['shirt'] : ''], $members);
     if ($team) {
+      if (!(int)$team['onsite']) foreach ($oldMembers as &$om) $om['shirt'] = '';
+      unset($om);
       $diff = sfpc_team_diff($team, $oldMembers, $in, $newMembers);
+      if ($onsite && !(int)$team['onsite'] && sfpc_shirt_closed()) $diff .= "\n(티셔츠 조사 마감 뒤에 오프라인으로 바꿈)";
       if ($diff !== '') sfpc_log((int)$team['id'], $ownerId, $u, 'edit', $diff);
       sfpc_account_sync((int)$team['id']);   /* 팀 이름이 바뀌면 계정에 보이는 이름도 */
     } else {
       sfpc_log((int)$newId, $ownerId, $u, 'create',
-        ($byAdmin ? "운영진이 대신 접수\n" : '') . $in['region'] . ' · ' . $cat['label'] . ' · ' . $in['school_name'] . ' · ' . $in['team_name']
+        ($byAdmin ? "운영진이 대신 접수\n" : '') . $in['region'] . ' · ' . $cat['label'] . ' · ' . $in['school_name'] . ' · ' . $in['team_name'] . ' · ' . sfpc_way_name($in)
+        . (($onsite && sfpc_shirt_closed()) ? ' (티셔츠 조사 마감 뒤)' : '')
         . "\n팀원: " . implode(', ', array_map('sfpc_member_text', $newMembers)));
     }
     $_SESSION['flash'] = ['msg' => '"' . $in['team_name'] . '" 팀 ' . ($team ? '내용을 고쳤습니다.' : '신청을 접수했습니다.'), 'err' => ''];
@@ -182,7 +193,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 while (count($in['members']) < $maxM) $in['members'][] = ['name' => '', 'grade' => 0, 'shirt' => ''];
 $isPre    = $in['category'] === 'preteacher';
-$onsiteUi = sfpc_is_onsite($in['region']);
+$canOnUi  = sfpc_can_onsite($kind, $in['region']);
+$onsiteUi = $canOnUi && $in['way'] === 'off';
+$shirtLate = sfpc_shirt_closed() && !($team && (int)$team['onsite']);
 $picked   = $in['school_id'] > 0 && !$isPre;
 $privacy  = trim(sfpc_setting('sfpc_privacy'));
 
@@ -203,7 +216,7 @@ sfpc_css();
   <div class="note err sfpc-hide" id="jsErr"></div>
 
   <form class="sfpc-form" method="post" action="sfpc_team.php" id="teamForm" novalidate
-        data-host="<?= h($host) ?>" data-schools="<?= $hasSchools ? '1' : '0' ?>">
+        data-host="<?= $kind === 'student' ? h($host) : '' ?>" data-schools="<?= $hasSchools ? '1' : '0' ?>">
     <?= sfpc_csrf_field() ?>
     <input type="hidden" name="kind" value="<?= h($kind) ?>">
     <?php if ($team): ?><input type="hidden" name="id" value="<?= (int)$team['id'] ?>"><?php endif; ?>
@@ -240,8 +253,19 @@ sfpc_css();
           </div>
         </div>
       </div>
+      <div class="field<?= $canOnUi ? '' : ' sfpc-hide' ?>" id="wayBox">
+        <label>참가 방식</label>
+        <div class="sfpc-way">
+          <label><input type="radio" name="way" value="off"<?= $in['way'] === 'off' ? ' checked' : '' ?>>
+            <span><b>오프라인 (대회장)</b><small>팀 전체가 대회장에 와서 참가합니다. 기념 티셔츠를 드립니다.</small></span></label>
+          <label><input type="radio" name="way" value="on"<?= $in['way'] === 'on' ? ' checked' : '' ?>>
+            <span><b>온라인</b><small>팀 전체가 학교나 집에서 참가합니다.</small></span></label>
+        </div>
+        <span class="hint"><b><?= h($host) ?></b> 지역 학생 팀만 고릅니다. 접수 기간에는 수정에서 바꿀 수 있습니다.</span>
+      </div>
       <p class="note info small sfpc-hide" id="onsiteNote" style="margin:-4px 0 16px">
-        <b><?= h($host) ?></b> 지역 팀은 대회장에서 참가합니다. 아래에서 팀원의 상의 사이즈를 함께 골라 주세요.</p>
+        <?php if ($shirtLate): ?><b>티셔츠 조사가 마감되었습니다.</b> 지금 오프라인으로 접수하거나 바꾸면 기념 티셔츠를 받지 못할 수 있습니다. 사이즈는 적어 주세요.
+        <?php else: ?>오프라인 참가 팀에게는 기념 티셔츠를 드립니다. 아래에서 팀원의 상의 사이즈를 함께 골라 주세요.<?php endif; ?></p>
 
       <div class="field sfpc-school">
         <label for="schoolQ" id="schoolLabel"><?= $isPre ? '대학교' : '학교' ?></label>
@@ -316,7 +340,7 @@ sfpc_css();
         <?php else: ?>
           <p><b>수집 항목</b></p>
           <ul><li>지도교사(신청인): 이름, 연락처, 이메일(선택)</li>
-              <li>팀원: 이름, 학년, 소속 학교, 상의 사이즈(현장 참가자)</li></ul>
+              <li>팀원: 이름, 학년, 소속 학교, 상의 사이즈(오프라인 참가자)</li></ul>
           <p><b>이용 목적</b> 참가 접수와 확인, 대회 계정 발급, 대회 운영과 안내, 결과 발표와 시상, 기념품 준비</p>
           <p><b>보유 기간</b> 대회가 끝나고 결과 정리를 마칠 때까지 보관한 뒤 파기합니다.</p>
           <p>동의하지 않을 수 있으나, 그 경우 참가 신청을 할 수 없습니다.</p>
@@ -359,7 +383,9 @@ sfpc_css();
   function show(el, on) { el.classList.toggle('sfpc-hide', !on); }
 
   function sync() {
-    var on = region.value !== '' && region.value === host;
+    var can = region.value !== '' && region.value === host;                 /* 개최 지역의 학생 팀만 참가 방식을 고른다 */
+    var w = f.querySelector('input[name=way]:checked'), on = can && !!w && w.value === 'off';
+    show(document.getElementById('wayBox'), can);
     document.querySelectorAll('.js-shirt').forEach(function (el) { show(el, on); });
     show(document.getElementById('onsiteNote'), on);
 
@@ -422,6 +448,8 @@ sfpc_css();
   f.querySelectorAll('input[name=category]').forEach(function (r) {
     r.addEventListener('change', function () { if (sid.value) { unpick(); q.value = ''; } sync(); });
   });
+
+  f.querySelectorAll('input[name=way]').forEach(function (r) { r.addEventListener('change', sync); });
 
   f.addEventListener('submit', function (e) {
     var msg = '';

@@ -14,7 +14,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib.php';
 
 /* 표 구조를 바꿀 때마다 1씩 올린다 */
-const SFPC_SCHEMA = 8;
+const SFPC_SCHEMA = 9;
 
 /* 올해 대회. 내년에는 이 값과 설정만 바꾸면 접수를 새로 받을 수 있다. */
 const SFPC_CONTEST = '2026';
@@ -56,7 +56,8 @@ const SFPC_SHIRTS = ['S', 'M', 'L', 'XL', '2XL', '3XL'];
    lib.php 의 SETTING_DEFAULTS 를 고치지 않으려고 기본값을 여기 따로 둔다. */
 const SFPC_DEFAULTS = [
   'sfpc_title'        => '2026 SFPC 충북',
-  'sfpc_host_region'  => '충북',                 // 이 지역 팀은 현장 참가
+  'sfpc_host_region'  => '충북',                 // 이 지역의 학생 팀만 오프라인(대회장) 참가를 고를 수 있다
+  'sfpc_shirt_due'    => '',                     // 티셔츠 조사 마감 (YYYY-MM-DD HH:MM). 그 뒤에 오프라인으로 바꾼 팀은 티셔츠를 못 받을 수 있다
   'sfpc_apply_from'   => '2026-11-27 00:00',
   'sfpc_apply_to'     => '2027-01-01 23:59',
   'sfpc_schedule'     => '',                     // 첫 화면에 보일 대회 일정 (마크다운)
@@ -220,6 +221,14 @@ if ((int)sfpc_setting('sfpc_schema') !== SFPC_SCHEMA) {
     contest TEXT NOT NULL, team_id INTEGER NOT NULL, boss INTEGER NOT NULL, round INTEGER NOT NULL,
     cnt INTEGER NOT NULL DEFAULT 0, started_at TEXT NOT NULL, ended_at TEXT NOT NULL DEFAULT '', removed_at TEXT NOT NULL DEFAULT '',
     UNIQUE(contest, team_id, boss, round))");
+  /* 9 — 보스는 한 판. skip = 1 은 "넘어가기"를 누른 보스 (0점, 길은 열린다. 나중에 도전해 6번 이상 기록하면 0 으로 돌아간다).
+         오프라인(대회장) 참가는 개최 지역의 학생 팀이 고른 경우뿐이다 — 교사 · 예비교사 팀은 옵저버이고 언제나 온라인. */
+  if (!in_array('skip', array_column(db()->query("PRAGMA table_info(sfpc_mash)")->fetchAll(PDO::FETCH_ASSOC), 'name'), true)) {
+    db()->exec("ALTER TABLE sfpc_mash ADD COLUMN skip INTEGER NOT NULL DEFAULT 0");
+    db()->exec("DELETE FROM sfpc_mash WHERE round > 1");
+    db()->exec("UPDATE sfpc_teams SET onsite = 0 WHERE kind = 'teacher'");
+    db()->exec("UPDATE sfpc_members SET shirt = '' WHERE team_id IN (SELECT id FROM sfpc_teams WHERE kind = 'teacher')");
+  }
   /* 학교 목록이 비어 있으면 함께 넣어 둔 목록으로 채운다 — 설치만 하면 학교 찾기가 바로 된다 */
   if ((int)db()->query("SELECT COUNT(*) FROM sfpc_schools")->fetchColumn() === 0 && sfpc_schools_load_bundled() > 0) {
     setting_set('sfpc_schools_at', now());
@@ -506,6 +515,7 @@ function sfpc_team_diff(array $old, array $oldMembers, array $new, array $newMem
   $pair('참가 구분', SFPC_CATS[$old['category']]['label'] ?? (string)$old['category'], SFPC_CATS[$new['category']]['label'] ?? (string)$new['category']);
   $pair('학교', (string)$old['school_name'], (string)$new['school_name']);
   $pair('팀명', (string)$old['team_name'], (string)$new['team_name']);
+  if (isset($new['onsite'])) $pair('참가 방식', sfpc_way_name($old), sfpc_way_name($new));
   $n = max(count($oldMembers), count($newMembers));
   for ($i = 0; $i < $n; $i++) {
     $a = isset($oldMembers[$i]) ? sfpc_member_text($oldMembers[$i]) : '';
@@ -533,6 +543,13 @@ function sfpc_teams_of(int $coachUserId): array {
 function sfpc_is_onsite(string $region): bool {
   return $region !== '' && $region === sfpc_setting('sfpc_host_region');
 }
+/* 온라인 / 오프라인을 고를 수 있는 팀인지 — 개최 지역의 학생 팀만. 나머지는 언제나 온라인이고 티셔츠도 없다. */
+function sfpc_can_onsite(string $kind, string $region): bool { return $kind === 'student' && sfpc_is_onsite($region); }
+function sfpc_way_name(array $t): string { return (int)($t['onsite'] ?? 0) ? '오프라인(대회장)' : '온라인'; }
+/* 티셔츠 조사가 마감되었는지 */
+function sfpc_shirt_closed(): bool { $d = sfpc_ts(sfpc_setting('sfpc_shirt_due')); return $d > 0 && time() > $d + 59; }
+/* 교사 · 예비교사 팀은 옵저버 — 대회에 참가하지만 어떤 순위에도 나오지 않는다 */
+function sfpc_is_observer_team(array $t): bool { return ($t['kind'] ?? '') === 'teacher'; }
 /* 접수 번호 — 화면과 문의에 쓰는 사람이 읽는 번호 */
 function sfpc_team_no(array $t): string {
   return 'S' . substr((string)$t['contest'], -2) . '-' . str_pad((string)$t['id'], 4, '0', STR_PAD_LEFT);
@@ -649,7 +666,14 @@ function sfpc_site_gate(?array $u, string $nav, string $root = ''): string {
   $inStudy = $study > 0 && (int)($_GET['set'] ?? 0) === $study && $page === 'problem.php';
   if ($inStudy) $nav = 'sfpc_study';
   if (is_admin($u)) return $nav;
-  if ($inStudy) { if (sfpc_setting('sfpc_study_open') === '1') return $nav; header('Location: ' . $root . 'sfpc_study.php'); exit; }
+  if ($inStudy) {
+    if (sfpc_setting('sfpc_study_open') !== '1') { header('Location: ' . $root . 'sfpc_study.php'); exit; }
+    $team = sfpc_my_team($u);                               /* 앞 월드의 보스를 지나지 않았으면 그 문제는 아직 못 연다 */
+    if ($team) foreach (sfpc_study_problems() as $i => $p) {
+      if ((int)$p['prob_no'] === (int)($_GET['no'] ?? 0) && !sfpc_world_open((int)$team['id'], $i)) { header('Location: ' . $root . 'sfpc_study.php'); exit; }
+    }
+    return $nav;
+  }
   if ($page === 'set.php' && $study > 0 && (int)($_GET['id'] ?? 0) === $study) { header('Location: ' . $root . 'sfpc_study.php'); exit; }
   if ($page === 'results.php' && $u && (int)($_GET['id'] ?? 0) > 0                      /* 자기 제출 하나를 다시 보는 것은 된다 */
       && (int)col("SELECT user_id FROM submissions WHERE id = ?", [(int)$_GET['id']]) === (int)$u['id']) return 'sfpc_study';
@@ -725,10 +749,13 @@ function sfpc_stage_bar(?array $u, string $nav, string $root = ''): bool {
 }
 
 /* ── 보스와 연타 ──────────────────────────────────
-   문제 sfpc_boss_every 개마다 보스 칸이 하나 있다. 맞힌 문제가 (보스 번호 × 간격)개 이상이면 그 보스가 열린다
-   — 어느 문제를 맞혔는지는 따지지 않는다. 보스에서는 연타를 두 판 하고, 순위는 모든 판의 합이다.
-   연타는 놀이다. 수료와 상관없고, 하지 않아도 된다. */
+   문제 sfpc_boss_every 개마다 보스 칸이 하나 있다 (한 월드 = 그 문제들 + 보스).
+   · 보스는 관문이다. 그 월드의 문제를 다 맞히면 열리고, 보스를 지나야 다음 월드로 간다.
+   · 보스에서는 연타를 한 판 한다. 끝났을 때 SFPC_MASH_MIN 번 이하면 무효 — 기록하지 않고 몇 번이든 다시 한다.
+   · "넘어가기"를 누르면 0점으로 길만 열린다. 나중에 돌아와 도전할 수 있다.
+   · 연타 순위는 모든 보스의 합. 수료와는 상관없다 (수료는 문제만 본다). */
 const SFPC_BOSSES = ['bug' => '버그 대장', 'golem' => '조건문 골렘', 'snake' => '무한 루프 뱀', 'spaghetti' => '스파게티 괴물', 'oni' => '런타임 도깨비 왕'];
+const SFPC_MASH_MIN = 5;           /* 이 횟수 이하로 끝난 판은 무효 */
 function sfpc_boss_every(): int { return max(1, (int)sfpc_setting('sfpc_boss_every')); }
 function sfpc_mash_sec(): int { return min(60, max(5, (int)sfpc_setting('sfpc_mash_sec'))); }
 function sfpc_boss_count(): int { return intdiv(count(sfpc_study_problems()), sfpc_boss_every()); }
@@ -738,16 +765,34 @@ function sfpc_boss_kind(int $n): array {
   $k = ($n === $total && $total > 0) ? 'oni' : $keys[($n - 1) % (count($keys) - 1)];
   return [$k, SFPC_BOSSES[$k]];
 }
+/* 팀의 보스별 줄. [보스 번호 => 줄] */
 function sfpc_mash_rows(int $teamId): array {
   $out = [];
-  foreach (all("SELECT * FROM sfpc_mash WHERE contest = ? AND team_id = ? ORDER BY boss, round", [SFPC_CONTEST, $teamId]) as $r) $out[(int)$r['boss']][(int)$r['round']] = $r;
+  foreach (all("SELECT * FROM sfpc_mash WHERE contest = ? AND team_id = ? AND round = 1", [SFPC_CONTEST, $teamId]) as $r) $out[(int)$r['boss']] = $r;
   return $out;
 }
-/* 연타 순위 — 지워지지 않은 판의 합. 같으면 먼저 그 합에 닿은 팀이 위. */
+/* 보스 한 마리의 상태: 'done' 기록 확정 · 'skip' 넘어감(다시 도전 가능) · '' 아직 */
+function sfpc_boss_state(?array $row): string {
+  if (!$row) return '';
+  if ((int)$row['skip'] === 1) return 'skip';
+  return $row['ended_at'] !== '' ? 'done' : '';
+}
+/* 1번부터 이어서 지나간(기록했거나 넘어간) 보스의 수. 이 수 + 1 번째 월드까지 들어갈 수 있다. */
+function sfpc_boss_passed(int $teamId): int {
+  $rows = sfpc_mash_rows($teamId); $n = 0; $total = sfpc_boss_count();
+  while ($n < $total && sfpc_boss_state($rows[$n + 1] ?? null) !== '') $n++;
+  return $n;
+}
+/* 문제(0부터 센 순서)가 속한 월드에 들어갈 수 있는지 — 앞 월드의 보스를 모두 지나야 한다 */
+function sfpc_world_open(int $teamId, int $probIndex): bool {
+  $world = min(intdiv($probIndex, sfpc_boss_every()), sfpc_boss_count());   /* 0부터. 보스 없는 자투리 문제는 마지막 보스 뒤 */
+  return sfpc_boss_passed($teamId) >= $world;
+}
+/* 연타 순위 — 확정된 기록의 합 (지운 기록 · 넘어간 보스는 0). 같으면 먼저 그 합에 닿은 팀이 위. 옵저버(교사 · 예비교사)는 빠진다. */
 function sfpc_mash_rank(): array {
   return all("SELECT t.id, t.team_name, t.school_name, t.avatar, SUM(m.cnt) total, COUNT(*) plays, MAX(m.ended_at) last_at
               FROM sfpc_mash m JOIN sfpc_teams t ON t.id = m.team_id
-              WHERE m.contest = ? AND m.removed_at = '' AND m.ended_at <> '' AND t.status = 'submitted'
+              WHERE m.contest = ? AND m.round = 1 AND m.skip = 0 AND m.removed_at = '' AND m.ended_at <> '' AND t.status = 'submitted' AND t.kind = 'student'
               GROUP BY t.id ORDER BY total DESC, last_at ASC", [SFPC_CONTEST]);
 }
 

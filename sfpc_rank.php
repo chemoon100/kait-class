@@ -1,6 +1,6 @@
 <?php
 /* ═══════════════════════════════════════════════
-   sfpc_rank.php — 연타 순위. 공부하기의 보스들과 싸운 모든 판의 합.
+   sfpc_rank.php — 연타 순위. 공부하기의 보스들과 싸운 기록의 합 (보스마다 한 판).
    다른 팀과 견주는 것은 이 순위 하나뿐이다 (공부하기 진도는 순위를 내지 않는다).
    ═══════════════════════════════════════════════ */
 declare(strict_types=1);
@@ -16,7 +16,7 @@ sfpc_css();
 ?>
 <div class="sfpc-world sfpc-rank">
   <div class="sfpc-arena-h"><span class="tag">SPACE MASH RANKING</span><h1>연타 순위</h1>
-    <p>보스들과 싸운 모든 판의 합입니다. 문제를 더 풀어 보스를 더 만나면 판이 늘어납니다.</p></div>
+    <p>모든 보스와 싸운 기록의 합입니다. 보스마다 한 판, 다섯 마리를 다 만나야 합계가 완성됩니다.</p></div>
   <?php if (!$rank): ?>
     <div class="sfpc-world-empty">아직 기록이 없습니다. 첫 보스를 만나 보세요.</div>
   <?php else: ?>
@@ -25,7 +25,7 @@ sfpc_css();
       <li class="<?= $mine ? 'me' : '' ?><?= $i < 3 ? ' top' : '' ?>">
         <span class="no"><?= $i + 1 ?></span>
         <canvas width="48" height="48" data-char="<?= h(json_encode(sfpc_char_of($r))) ?>" aria-hidden="true"></canvas>
-        <span class="t"><b><?= h($r['team_name']) ?></b><small><?= h($r['school_name']) ?> · <?= (int)$r['plays'] ?>판</small></span>
+        <span class="t"><b><?= h($r['team_name']) ?></b><small><?= h($r['school_name']) ?> · 보스 <?= (int)$r['plays'] ?>마리</small></span>
         <span class="sum"><?= number_format((int)$r['total']) ?><i>회</i></span>
       </li>
     <?php endforeach; ?>
