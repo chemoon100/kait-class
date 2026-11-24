@@ -303,3 +303,92 @@ table.sfpc-pvlinks td a:hover{text-decoration:none; background:var(--b50)}
 .sfpc-st-list li.ok .s{color:#0F6E56; font-weight:700}
 @media (max-width:640px){ .sfpc-st-list{grid-template-columns:1fr} }
 .sfpc-stages .st .tag{background:none; padding:0; border:0; border-radius:0; display:block}
+
+/* ── 단계 안의 화면 (공부하기 지도 · 보스 · 연타 순위 · 수료 축하) ──
+   공용 메뉴 대신 얇은 띠(.sfpc-bar)가 나오고, 본문은 첫 화면과 같은 어두운 바탕이다. */
+@font-face{font-family:'Galmuri11'; font-style:normal; font-weight:700; font-display:swap; src:url('fonts/Galmuri11-Bold.woff2') format('woff2')}
+.sfpc-bar{background:#1D1238; color:#CECBF6; font-family:'Galmuri11', var(--mono); font-weight:700; font-size:13px; position:sticky; top:0; z-index:40}
+.sfpc-bar .in{max-width:1180px; margin:0 auto; padding:11px 20px; display:flex; align-items:center; gap:18px; flex-wrap:wrap}
+.sfpc-bar a{color:#CECBF6; text-decoration:none; white-space:nowrap}
+.sfpc-bar a:hover, .sfpc-bar a.on{color:#fff}
+.sfpc-bar a.on{border-bottom:2px solid #5DCAA5; padding-bottom:1px}
+.sfpc-bar b{color:#fff; font-size:15px}
+.sfpc-bar .pill{padding:3px 11px; border-radius:20px; background:#04342C; color:#5DCAA5; font-size:12px}
+.sfpc-bar .g{flex:1}
+.sfpc-bar .me{color:#fff}
+.sfpc-world{background-color:#140A24; color:#fff; min-height:calc(100vh - 44px); padding:22px 20px 40px;
+  background-image:linear-gradient(rgba(127,119,221,.10) 1px, transparent 1px), linear-gradient(90deg, rgba(93,202,165,.07) 1px, transparent 1px); background-size:48px 48px;
+  font-family:'Galmuri11', var(--mono); font-weight:700}
+.sfpc-world > *{max-width:1100px; margin-left:auto; margin-right:auto}
+.sfpc-world-note{padding:9px 14px; margin-bottom:12px; border:1px dashed #534AB7; border-radius:8px; color:#CECBF6; font-size:12px}
+.sfpc-world-hud{display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:6px}
+.sfpc-world-hud .who b{font-size:20px; margin-right:12px}
+.sfpc-world-hud .who span{font-size:12px; color:#AFA9EC}
+.sfpc-world-hud .who .grad{font-size:12px; color:#FAC775; text-decoration:none}
+.sfpc-world-hud .bar{flex:1; min-width:160px; height:14px; background:#2A2150; border-radius:2px; overflow:hidden}
+.sfpc-world-hud .bar i{display:block; height:100%; background:#5DCAA5}
+.sfpc-world-hud .n{font-size:20px; color:#5DCAA5}
+.sfpc-world-map canvas{display:block; width:100%; height:auto; image-rendering:pixelated; outline:none; cursor:pointer}
+.sfpc-world-map canvas:focus-visible{box-shadow:0 0 0 2px #534AB7}
+.sfpc-world-info{position:sticky; bottom:12px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:14px 18px; background:#1D1238; border:2px solid #3C3489; border-radius:12px; margin-top:6px}
+.sfpc-world-info .txt{flex:1; min-width:200px}
+.sfpc-world-info .txt b{display:block; font-size:18px}
+.sfpc-world-info .txt span{font-size:12px; color:#AFA9EC}
+.sfpc-world-info .go{padding:13px 24px; border-radius:8px; background:#5DCAA5; color:#04342C; text-decoration:none; font-size:15px; white-space:nowrap}
+.sfpc-world-info .go:hover{background:#fff}
+.sfpc-world-info .go.boss{background:#FAC775; color:#412402}
+.sfpc-world-info .go.off{background:#2A2150; color:#6E66A8; cursor:default}
+.sfpc-world-help{margin-top:12px; font-size:12px; color:#6E66A8; text-align:center}
+.sfpc-world-help a{color:#AFA9EC}
+.sfpc-world-empty{padding:60px 20px; text-align:center; color:#AFA9EC; border:1px dashed #3C3489; border-radius:12px; margin-top:20px}
+/* 목록으로 보기는 밝은 화면 그대로 */
+.sfpc-st-listpage{padding-top:22px}
+/* 보스 대결 */
+.sfpc-arena-h{text-align:center; margin-bottom:6px}
+.sfpc-arena-h .tag{display:inline-block; font-size:12px; color:#FAC775; letter-spacing:.12em; background:none; padding:0}
+.sfpc-arena-h h1{margin:6px 0 8px; font-size:34px; color:#fff}
+.sfpc-arena-h p{margin:0; font-size:12px; color:#AFA9EC; font-family:var(--sans); font-weight:500; font-size:14px}
+.sfpc-arena canvas{display:block; width:100%; max-width:1000px; height:auto; image-rendering:pixelated; margin-top:8px}
+.sfpc-arena-ui{text-align:center}
+.sfpc-arena-ui .score{display:flex; justify-content:center; gap:26px; font-size:14px; color:#AFA9EC; margin:6px 0 14px}
+.sfpc-arena-ui .score b{color:#fff; font-size:22px; margin-left:6px}
+.sfpc-arena-ui .score .sum b{color:#FAC775}
+.sfpc-arena-ui .big{font:inherit; font-size:20px; padding:22px 40px; min-width:min(520px, 100%); border-radius:12px; border:2px solid #5DCAA5; background:#0B2A25; color:#9FE1CB; cursor:pointer; touch-action:manipulation; user-select:none}
+.sfpc-arena-ui .big:hover:not(:disabled){background:#5DCAA5; color:#04342C}
+.sfpc-arena-ui .big:disabled{border-color:#3C3489; background:#1D1238; color:#6E66A8; cursor:default}
+.sfpc-arena-ui .msg{min-height:22px; margin:12px 0 0; font-size:14px; color:#FAC775}
+.sfpc-arena-ui .links{margin:14px 0 0; font-size:12px; display:flex; justify-content:center; gap:22px}
+.sfpc-arena-ui .links a{color:#AFA9EC}
+/* 연타 순위 */
+.sfpc-rank-list{list-style:none; padding:0; margin:18px auto 0; max-width:720px}
+.sfpc-rank-list li{display:flex; align-items:center; gap:14px; padding:10px 16px; margin-bottom:8px; background:#1D1238; border:2px solid #2A2150; border-radius:10px}
+.sfpc-rank-list li.top{border-color:#BA7517}
+.sfpc-rank-list li.me{border-color:#5DCAA5; background:#0B2A25}
+.sfpc-rank-list .no{flex:0 0 36px; font-size:20px; color:#7F77DD; text-align:center}
+.sfpc-rank-list li.top .no{color:#FAC775}
+.sfpc-rank-list canvas{image-rendering:pixelated; flex:0 0 48px}
+.sfpc-rank-list .t{flex:1; min-width:0}
+.sfpc-rank-list .t b{display:block; font-size:16px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.sfpc-rank-list .t small{font-family:var(--sans); font-weight:500; font-size:12.5px; color:#AFA9EC}
+.sfpc-rank-list .sum{font-size:24px; color:#fff}
+.sfpc-rank-list .sum i{font-style:normal; font-size:12px; color:#AFA9EC; margin-left:4px}
+/* 수료 축하 */
+.sfpc-grad{position:relative; overflow:hidden; text-align:center; padding-bottom:120px}
+.sfpc-grad #gfx{position:absolute; inset:0; width:100%; height:100%; max-width:none; pointer-events:none}
+.sfpc-grad .in{position:relative}
+.sfpc-grad .tag{display:inline-block; margin:18px 0 0; font-size:13px; letter-spacing:.2em; color:#5DCAA5; background:none; padding:0}
+.sfpc-grad h1{margin:10px 0 18px; font-size:54px; line-height:1.1; color:#FAC775}
+.sfpc-grad .team{margin:0; font-size:34px; color:#fff}
+.sfpc-grad .sch{margin:8px 0 0; font-size:12px; color:#AFA9EC}
+.sfpc-grad .members{display:flex; justify-content:center; gap:26px; flex-wrap:wrap; margin:26px 0 22px}
+.sfpc-grad .members .m canvas{display:block; image-rendering:pixelated; margin:0 auto}
+.sfpc-grad .members .m b{display:block; margin-top:6px; font-size:18px; color:#fff}
+.sfpc-grad .pass{display:inline-block; max-width:680px; padding:18px 26px; border:2px solid #5DCAA5; border-radius:14px; background:rgba(11,42,37,.92); font-family:var(--sans); font-weight:600}
+.sfpc-grad .pass b{display:block; font-size:17px; color:#9FE1CB; margin-bottom:6px}
+.sfpc-grad .pass span{font-size:16px; color:#fff}
+.sfpc-grad .pass em{font-style:normal; color:#FAC775}
+.sfpc-grad .links{margin:24px 0 0; display:flex; justify-content:center; align-items:center; gap:20px; font-size:13px}
+.sfpc-grad .links a{color:#AFA9EC}
+.sfpc-grad .links a.go{padding:13px 24px; border-radius:8px; background:#5DCAA5; color:#04342C; text-decoration:none; font-size:15px}
+@media (max-width:700px){ .sfpc-grad h1{font-size:34px} .sfpc-grad .team{font-size:24px} .sfpc-arena-h h1{font-size:24px} .sfpc-world-hud .who b{display:block} }
+.sfpc-world-hud .who b, .sfpc-world b{color:inherit} .sfpc-world-hud .who b{color:#fff}

@@ -196,6 +196,7 @@ function page_head(array $o): void {
 <?php endif; ?>
 <?php /* 관리자 화면은 위쪽 메뉴 띠를 어둡게 (1.5.0) — 학생 화면과 한눈에 구분되게.
          메뉴가 두 줄로 넘어가지 않게 로고 옆 '관리자' 표시 · 이름 옆 '(나의 활동)' 은 뺐다 (1.6.1) */ ?>
+<?php if (sfpc_stage_bar($u, (string)$nav, $root)): /* 공부하기 · 준비하기 안에서는 그 단계의 띠가 공용 메뉴를 대신한다 (sfpc_lib.php) */ else: ?>
 <header class="top<?= $isAdminArea ? ' is-admin' : '' ?>">
   <div class="top-in">
     <?php $logo = site_image_url('logo', $root); ?>
@@ -247,6 +248,7 @@ function page_head(array $o): void {
     <?php endif; ?>
   </div>
 </header>
+<?php endif; ?>
 <?php /* 교사가 학생 화면으로 보는 중이면 띠로 알린다 (1.17.0).
          교사용 버튼이 모두 감춰지므로, 로그인이 풀린 것으로 착각하지 않게. */ ?>
 <?php if ($isAdmin && !$isAdminArea): ?>

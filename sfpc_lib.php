@@ -14,7 +14,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib.php';
 
 /* 표 구조를 바꿀 때마다 1씩 올린다 */
-const SFPC_SCHEMA = 7;
+const SFPC_SCHEMA = 8;
 
 /* 올해 대회. 내년에는 이 값과 설정만 바꾸면 접수를 새로 받을 수 있다. */
 const SFPC_CONTEST = '2026';
@@ -64,7 +64,9 @@ const SFPC_DEFAULTS = [
   'sfpc_contact'      => 'kaiteachers2013@gmail.com',
   'sfpc_site'         => '1',                    // 이 사이트 전체가 SFPC 사이트다 — 위쪽 메뉴를 접수 · 공부하기 · 준비하기 · 도전하기 · 스코어보드로 바꾸고,
                                                  //   KAIT-CLASS 의 기존 메뉴(문제 모음 · 채점 결과 · 수업 · 평가)는 운영진에게만 보인다
-  'sfpc_study_open'   => '1',                    // 공부하기 공개
+  'sfpc_study_open'   => '1',
+  'sfpc_boss_every'   => '2',                    // 공부하기에서 문제 몇 개마다 보스(연타 도전)를 둘지
+  'sfpc_mash_sec'     => '20',                   // 연타 한 판의 길이(초)                    // 공부하기 공개
   'sfpc_ready_open'   => '0',                    // 준비하기 공개
   'sfpc_menu_on'      => '1',                    // 위쪽 메뉴에 SFPC 보이기
   'sfpc_landing_on'   => '1',                    // 접수 전 · 접수 중에 첫 화면을 SFPC 안내로 (sfpc_landing.php)
@@ -211,6 +213,13 @@ if ((int)sfpc_setting('sfpc_schema') !== SFPC_SCHEMA) {
     db()->exec("ALTER TABLE sfpc_teams ADD COLUMN study_done_at TEXT NOT NULL DEFAULT ''");
     setting_set('sfpc_study_open', '1');
   }
+  /* 8 — 연타 기록. 보스 하나에 두 판(round 1 · 2). 시작할 때 줄을 만들고 끝나면 횟수를 적는다.
+         removed_at 이 있으면 운영진이 지운 기록이다 (순위에서 빠지고, 되돌릴 수 있다). */
+  db()->exec("CREATE TABLE IF NOT EXISTS sfpc_mash(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contest TEXT NOT NULL, team_id INTEGER NOT NULL, boss INTEGER NOT NULL, round INTEGER NOT NULL,
+    cnt INTEGER NOT NULL DEFAULT 0, started_at TEXT NOT NULL, ended_at TEXT NOT NULL DEFAULT '', removed_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(contest, team_id, boss, round))");
   /* 학교 목록이 비어 있으면 함께 넣어 둔 목록으로 채운다 — 설치만 하면 학교 찾기가 바로 된다 */
   if ((int)db()->query("SELECT COUNT(*) FROM sfpc_schools")->fetchColumn() === 0 && sfpc_schools_load_bundled() > 0) {
     setting_set('sfpc_schools_at', now());
@@ -648,6 +657,100 @@ function sfpc_site_gate(?array $u, string $nav, string $root = ''): string {
   return $nav;
 }
 
+/* 연습용 기초 문제 10개 — 지도 · 수료 · 연타를 시험하려고 넣는다. 만든 문제 수를 돌려준다.
+   문제는 잠긴 채(문제 모음에 안 보임) 만들고 공부하기 묶음에 담는다. */
+function sfpc_demo_problems(): int {
+  $P = [
+    ['Hello, SFPC', '화면에 `Hello, SFPC!` 를 출력하세요.', '입력은 없습니다.', '`Hello, SFPC!` 를 한 줄에 출력합니다.', [['', 'Hello, SFPC!']]],
+    ['두 줄 출력', '첫 줄에 `SFPC`, 둘째 줄에 `2026` 을 출력하세요.', '입력은 없습니다.', '두 줄을 출력합니다.', [['', "SFPC\n2026"]]],
+    ['그대로 따라 말하기', '한 줄을 입력받아 그대로 출력하세요.', '한 줄의 글이 주어집니다. (길이 100 이하)', '입력받은 줄을 그대로 출력합니다.', [['hello', 'hello'], ['chungbuk 2026', 'chungbuk 2026'], ['a', 'a']]],
+    ['두 수 더하기', '두 정수 a, b 를 입력받아 a + b 를 출력하세요.', '한 줄에 정수 a, b 가 빈칸으로 나뉘어 주어집니다. (-1000 ≤ a, b ≤ 1000)', 'a + b 를 출력합니다.', [['3 5', '8'], ['-7 2', '-5'], ['1000 1000', '2000'], ['0 0', '0']]],
+    ['몫과 나머지', '두 자연수 a, b 를 입력받아 a 를 b 로 나눈 몫과 나머지를 출력하세요.', '한 줄에 자연수 a, b 가 주어집니다. (1 ≤ a, b ≤ 10000)', '첫 줄에 몫, 둘째 줄에 나머지를 출력합니다.', [['7 3', "2\n1"], ['10 5', "2\n0"], ['3 7', "0\n3"], ['9999 10', "999\n9"]]],
+    ['짝수와 홀수', '정수 n 이 짝수이면 `even`, 홀수이면 `odd` 를 출력하세요.', '정수 n 이 주어집니다. (0 ≤ n ≤ 100000)', '`even` 또는 `odd` 를 출력합니다.', [['4', 'even'], ['7', 'odd'], ['0', 'even'], ['99999', 'odd']]],
+    ['더 큰 수', '두 정수 중 더 큰 수를 출력하세요. 같으면 그 수를 출력합니다.', '한 줄에 정수 a, b 가 주어집니다. (-1000 ≤ a, b ≤ 1000)', '더 큰 수를 출력합니다.', [['3 9', '9'], ['10 -2', '10'], ['5 5', '5'], ['-8 -3', '-3']]],
+    ['1부터 N까지의 합', '1 부터 n 까지의 합을 출력하세요.', '자연수 n 이 주어집니다. (1 ≤ n ≤ 10000)', '합을 출력합니다.', [['10', '55'], ['1', '1'], ['100', '5050'], ['10000', '50005000']]],
+    ['구구단', 'n 단을 1 부터 9 까지 출력하세요.', '자연수 n 이 주어집니다. (1 ≤ n ≤ 9)', '`n * i = 값` 꼴로 아홉 줄을 출력합니다.', [['2', "2 * 1 = 2\n2 * 2 = 4\n2 * 3 = 6\n2 * 4 = 8\n2 * 5 = 10\n2 * 6 = 12\n2 * 7 = 14\n2 * 8 = 16\n2 * 9 = 18"], ['9', "9 * 1 = 9\n9 * 2 = 18\n9 * 3 = 27\n9 * 4 = 36\n9 * 5 = 45\n9 * 6 = 54\n9 * 7 = 63\n9 * 8 = 72\n9 * 9 = 81"]]],
+    ['거꾸로 출력', '낱말 하나를 입력받아 거꾸로 뒤집어 출력하세요.', '영어 소문자로 된 낱말이 주어집니다. (길이 1 이상 100 이하)', '뒤집은 낱말을 출력합니다.', [['sfpc', 'cpfs'], ['a', 'a'], ['level', 'level'], ['chungbuk', 'kubgnuhc']]],
+  ];
+  $set = sfpc_study_set();
+  return (int)tx(function (PDO $d) use ($P, $set) {
+    $no = max(1000, (int)$d->query("SELECT COALESCE(MAX(prob_no), 0) FROM problems")->fetchColumn());
+    foreach ($P as $i => [$title, $desc, $in, $out, $tcs]) {
+      $d->prepare("INSERT INTO problems(prob_no, title, description, input_desc, output_desc, time_limit, memory_limit, active, show_diff, created_at) VALUES(?,?,?,?,?,2.0,128000,0,1,?)")
+        ->execute([++$no, $title, $desc, $in, $out, now()]);
+      $pid = (int)$d->lastInsertId();
+      foreach ($tcs as $k => [$tin, $texp])
+        $d->prepare("INSERT INTO testcases(problem_id, seq, input, expected, is_sample) VALUES(?,?,?,?,?)")
+          ->execute([$pid, $k + 1, str_replace('\\n', "\n", $tin), str_replace('\\n', "\n", $texp), $k === 0 ? 1 : 0]);
+      $d->prepare("INSERT INTO set_problems(set_id, problem_id, required_ac, sort) VALUES(?,?,1,?)")->execute([$set['id'], $pid, $i + 1]);
+    }
+    return count($P);
+  });
+}
+
+/* ── 단계 띠 ──────────────────────────────────────
+   공부하기(와 그 안의 문제 풀이 화면)에서는 공용 메뉴 대신 이 띠가 나온다. 그려 넣었으면 true.
+   운영진이 교사 화면으로 볼 때는 공용 메뉴를 그대로 둔다 (수정 · 테스트케이스 버튼을 써야 하므로). */
+function sfpc_stage_bar(?array $u, string $nav, string $root = ''): bool {
+  if (!sfpc_site() || $nav !== 'sfpc_study' || !$u) return false;
+  $page = basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
+  if (!in_array($page, ['sfpc_study.php', 'sfpc_boss.php', 'sfpc_rank.php', 'sfpc_grad.php', 'problem.php'], true)) return false;
+  if (is_admin($u) && function_exists('teacher_view') && teacher_view($u) && $page === 'problem.php') return false;
+  $set = sfpc_study_set(false); $probs = sfpc_study_problems();
+  $team = sfpc_my_team($u);
+  $need = array_diff(array_map('intval', array_column($probs, 'id')), sfpc_study_skip());
+  $got  = count(array_intersect($need, sfpc_study_solved((int)$u['id'])));
+  sfpc_css($root);
+  echo '<header class="sfpc-bar"><div class="in">';
+  if ($page === 'problem.php') {
+    $no = (int)($_GET['no'] ?? 0); $idx = -1;
+    foreach ($probs as $i => $p) if ((int)$p['prob_no'] === $no) $idx = $i;
+    $link = fn(int $i) => $root . 'problem.php?no=' . (int)$probs[$i]['prob_no'] . '&amp;set=' . (int)$set['id'];
+    echo '<a class="back" href="' . h($root) . 'sfpc_study.php">← 지도로</a><b>공부하기' . ($idx >= 0 ? ' · ' . ($idx + 1) . '번' : '') . '</b>'
+       . '<span class="pill">' . $got . ' / ' . count($need) . '</span><span class="g"></span>'
+       . ($idx > 0 ? '<a href="' . $link($idx - 1) . '">◀ ' . $idx . '번</a>' : '')
+       . ($idx >= 0 && $idx < count($probs) - 1 ? '<a href="' . $link($idx + 1) . '">' . ($idx + 2) . '번 ▶</a>' : '');
+  } else {
+    $on = fn(string $f) => $page === $f ? ' class="on"' : '';
+    echo '<a class="back" href="' . h($root) . 'index.php">← SFPC</a><b>공부하기</b>'
+       . '<span class="pill">' . $got . ' / ' . count($need) . '</span><span class="g"></span>'
+       . '<a' . $on('sfpc_study.php') . ' href="' . h($root) . 'sfpc_study.php">지도</a>'
+       . '<a href="' . h($root) . 'sfpc_study.php?view=list">목록</a>'
+       . '<a' . $on('sfpc_rank.php') . ' href="' . h($root) . 'sfpc_rank.php">연타 순위</a>';
+  }
+  echo '<a class="me" href="' . h($root . ($team ? 'sfpc_me.php' : (is_admin($u) ? 'admin/sfpc.php?tab=study' : 'sfpc_teams.php'))) . '">'
+     . h($team ? $team['team_name'] : ($u['name'] !== '' ? $u['name'] : $u['login_id'])) . '</a>'
+     . '<a href="' . h($root) . 'logout.php">로그아웃</a></div></header>';
+  return true;
+}
+
+/* ── 보스와 연타 ──────────────────────────────────
+   문제 sfpc_boss_every 개마다 보스 칸이 하나 있다. 맞힌 문제가 (보스 번호 × 간격)개 이상이면 그 보스가 열린다
+   — 어느 문제를 맞혔는지는 따지지 않는다. 보스에서는 연타를 두 판 하고, 순위는 모든 판의 합이다.
+   연타는 놀이다. 수료와 상관없고, 하지 않아도 된다. */
+const SFPC_BOSSES = ['bug' => '버그 대장', 'golem' => '조건문 골렘', 'snake' => '무한 루프 뱀', 'spaghetti' => '스파게티 괴물', 'oni' => '런타임 도깨비 왕'];
+function sfpc_boss_every(): int { return max(1, (int)sfpc_setting('sfpc_boss_every')); }
+function sfpc_mash_sec(): int { return min(60, max(5, (int)sfpc_setting('sfpc_mash_sec'))); }
+function sfpc_boss_count(): int { return intdiv(count(sfpc_study_problems()), sfpc_boss_every()); }
+/* 보스 번호(1부터) → [종류, 이름]. 마지막 보스는 언제나 도깨비 왕이다. */
+function sfpc_boss_kind(int $n): array {
+  $keys = array_keys(SFPC_BOSSES); $total = sfpc_boss_count();
+  $k = ($n === $total && $total > 0) ? 'oni' : $keys[($n - 1) % (count($keys) - 1)];
+  return [$k, SFPC_BOSSES[$k]];
+}
+function sfpc_mash_rows(int $teamId): array {
+  $out = [];
+  foreach (all("SELECT * FROM sfpc_mash WHERE contest = ? AND team_id = ? ORDER BY boss, round", [SFPC_CONTEST, $teamId]) as $r) $out[(int)$r['boss']][(int)$r['round']] = $r;
+  return $out;
+}
+/* 연타 순위 — 지워지지 않은 판의 합. 같으면 먼저 그 합에 닿은 팀이 위. */
+function sfpc_mash_rank(): array {
+  return all("SELECT t.id, t.team_name, t.school_name, t.avatar, SUM(m.cnt) total, COUNT(*) plays, MAX(m.ended_at) last_at
+              FROM sfpc_mash m JOIN sfpc_teams t ON t.id = m.team_id
+              WHERE m.contest = ? AND m.removed_at = '' AND m.ended_at <> '' AND t.status = 'submitted'
+              GROUP BY t.id ORDER BY total DESC, last_at ASC", [SFPC_CONTEST]);
+}
+
 /* ── 단계 버튼 (공부하기 · 준비하기 · 도전하기 · 스코어보드) ──
    첫 화면과 우리 팀 화면에 크게 놓는다. 열려 있는 단계만 테두리에 전류가 흐르고, 나머지는 "준비 중"이다. */
 const SFPC_STAGES = [
@@ -710,6 +813,7 @@ function sfpc_study_check(array $t): bool {
   $need = array_diff(array_map('intval', array_column(sfpc_study_problems(), 'id')), sfpc_study_skip());
   if (!$need || array_diff($need, sfpc_study_solved($uid))) return false;
   sfpc_study_grant($t, null);
+  if (session_status() === PHP_SESSION_ACTIVE) $_SESSION['sfpc_grad'] = (int)$t['id'];   /* 다음 화면에서 축하 화면을 한 번 띄운다 */
   return true;
 }
 /* 수료 처리 — $actor 가 있으면 운영진이 손으로 한 것 */

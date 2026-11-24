@@ -292,6 +292,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     setting_set('sfpc_study_skip', implode(',', $skip));
     redirect_with('수료 조건을 바꿨습니다. 이미 수료한 팀은 그대로 수료입니다.');
   }
+  /* 연타 기록 지우기 · 되돌리기 (지운 기록은 순위에서 빠질 뿐 남아 있다) */
+  if ($act === 'mash_toggle') {
+    $r = one("SELECT * FROM sfpc_mash WHERE id = ?", [(int)($_POST['mid'] ?? 0)]);
+    if (!$r) redirect_with('', '기록을 찾지 못했습니다.');
+    db()->prepare("UPDATE sfpc_mash SET removed_at = ? WHERE id = ?")->execute([$r['removed_at'] === '' ? now() : '', $r['id']]);
+    $t = sfpc_team((int)$r['team_id']);
+    if ($t) sfpc_log((int)$t['id'], (int)$t['coach_user_id'], $me, 'study', '연타 기록(보스 ' . $r['boss'] . ' · ' . $r['round'] . '판 · ' . $r['cnt'] . '회)을 ' . ($r['removed_at'] === '' ? '지움' : '되돌림'));
+    redirect_with($r['removed_at'] === '' ? '기록을 지웠습니다. 순위에서 빠집니다. 같은 자리에서 되돌릴 수 있습니다.' : '기록을 되돌렸습니다.');
+  }
+  if ($act === 'mash_again') {            /* 그 판을 아예 없애 다시 할 수 있게 한다 */
+    $r = one("SELECT * FROM sfpc_mash WHERE id = ?", [(int)($_POST['mid'] ?? 0)]);
+    if (!$r) redirect_with('', '기록을 찾지 못했습니다.');
+    db()->prepare("DELETE FROM sfpc_mash WHERE team_id = ? AND boss = ? AND round >= ?")->execute([$r['team_id'], $r['boss'], $r['round']]);
+    $t = sfpc_team((int)$r['team_id']);
+    if ($t) sfpc_log((int)$t['id'], (int)$t['coach_user_id'], $me, 'study', '연타 기록(보스 ' . $r['boss'] . ' · ' . $r['round'] . '판 · ' . $r['cnt'] . '회)을 없애 다시 할 수 있게 함');
+    redirect_with('그 판을 없앴습니다. 팀이 다시 할 수 있습니다.');
+  }
+  if ($act === 'study_conf') {
+    setting_set('sfpc_boss_every', (string)max(1, min(50, (int)($_POST['boss_every'] ?? 10))));
+    setting_set('sfpc_mash_sec', (string)max(5, min(60, (int)($_POST['mash_sec'] ?? 20))));
+    redirect_with('저장했습니다.');
+  }
+  /* 연습용 문제 넣기 — 묶음이 비어 있을 때만. 지도 · 수료 · 연타를 시험해 보는 용도다 */
+  if ($act === 'study_demo') {
+    if (sfpc_study_problems()) redirect_with('', '이미 문제가 담겨 있습니다.');
+    $n = sfpc_demo_problems();
+    redirect_with('연습용 문제 ' . $n . '개를 만들어 공부하기에 담았습니다. 교육팀 문제가 준비되면 바꿔 주세요.');
+  }
   if ($act === 'study_grant' || $act === 'study_revoke') {
     $t = sfpc_team((int)($_POST['id'] ?? 0));
     if (!$t) redirect_with('', '팀을 찾지 못했습니다.');
@@ -665,9 +693,19 @@ sfpc_css('../');
     <a class="btn sm" href="../sfpc_study.php" target="_blank" rel="noopener">공부하기 화면 보기</a>
     <br><span class="small">팀 계정이 이 묶음의 문제를 <b>모두</b> 맞히면 자동으로 수료되고, 수료한 중학교 팀은 정식참가자가 됩니다. 공개 여부는 설정 탭의 "공부하기 공개"입니다 (지금 <?= sfpc_setting('sfpc_study_open') === '1' ? '공개' : '준비 중' ?>).</span></div>
 
+  <form method="post" class="sfpc-rowform" style="margin-top:14px; gap:10px; flex-wrap:wrap">
+    <?= sfpc_csrf_field() ?><input type="hidden" name="act" value="study_conf">
+    <label class="small">문제 <input type="number" name="boss_every" min="1" max="50" value="<?= sfpc_boss_every() ?>" style="width:70px"> 개마다 보스</label>
+    <label class="small">연타 한 판 <input type="number" name="mash_sec" min="5" max="60" value="<?= sfpc_mash_sec() ?>" style="width:70px"> 초</label>
+    <button class="btn sm">저장</button>
+    <span class="small muted">지금 보스 <?= sfpc_boss_count() ?>마리 · 맞힌 문제가 (보스 번호 × 간격)개가 되면 열립니다</span>
+  </form>
+
   <h2 style="font-size:17px; margin:22px 0 10px">문제 <?= count($probs) ?>개 <span class="small muted" style="font-weight:400">· 수료에 필요한 문제 <?= count($needIds) ?>개</span></h2>
   <?php if (!$probs): ?>
-    <div class="empty">아직 묶음에 담긴 문제가 없습니다. 문제가 하나도 없으면 아무 팀도 수료되지 않습니다.</div>
+    <div class="empty">아직 묶음에 담긴 문제가 없습니다. 문제가 하나도 없으면 아무 팀도 수료되지 않습니다.
+      <form method="post" style="margin-top:12px"><?= sfpc_csrf_field() ?><input type="hidden" name="act" value="study_demo">
+        <button class="btn" onclick="return confirm('연습용 기초 문제 10개를 만들어 공부하기에 담을까요?')">연습용 문제 10개 넣기</button></form></div>
   <?php else: ?>
   <div class="tablewrap"><table class="list">
     <thead><tr><th>순서</th><th>문제</th><th class="num">맞힌 팀</th><th>수료 조건</th></tr></thead>
@@ -701,6 +739,27 @@ sfpc_css('../');
         <td><form method="post" style="display:inline"><?= sfpc_csrf_field() ?><input type="hidden" name="id" value="<?= (int)$t['id'] ?>">
           <?php if ($done): ?><button class="btn sm" name="act" value="study_revoke" onclick="return confirm('이 팀의 수료를 취소할까요?')">수료 취소</button>
           <?php else: ?><button class="btn sm" name="act" value="study_grant" onclick="return confirm('이 팀을 수료 처리할까요?<?= $t['category'] === 'middle' ? '\\n중학교 팀이라 정식참가자로 바뀝니다.' : '' ?>')">수료 처리</button><?php endif; ?></form></td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table></div>
+  <?php endif; ?>
+
+  <?php $mrows = all("SELECT m.*, t.team_name FROM sfpc_mash m JOIN sfpc_teams t ON t.id = m.team_id WHERE m.contest = ? ORDER BY m.id DESC LIMIT 300", [SFPC_CONTEST]); ?>
+  <h2 style="font-size:17px; margin:26px 0 10px">연타 기록 <span class="small muted" style="font-weight:400">· 최근 <?= count($mrows) ?>판 · <a href="../sfpc_rank.php" target="_blank" rel="noopener">순위 보기</a></span></h2>
+  <?php if (!$mrows): ?><div class="empty">아직 기록이 없습니다.</div><?php else: ?>
+  <div class="tablewrap"><table class="list">
+    <thead><tr><th>때</th><th>팀</th><th>보스</th><th class="num">횟수</th><th></th></tr></thead>
+    <tbody>
+    <?php foreach ($mrows as $m): $gone = $m['removed_at'] !== ''; ?>
+      <tr<?= $gone ? ' style="opacity:.55"' : '' ?>>
+        <td class="small"><?= h(substr($m['started_at'], 5, 11)) ?></td>
+        <td><b><?= h($m['team_name']) ?></b></td>
+        <td>보스 <?= (int)$m['boss'] ?> · <?= (int)$m['round'] ?>판</td>
+        <td class="num"><?= $m['ended_at'] === '' ? '<span class="muted">진행 중</span>' : (int)$m['cnt'] ?><?= $gone ? ' <span class="sfpc-flag">지움</span>' : '' ?></td>
+        <td><form method="post" style="display:inline"><?= sfpc_csrf_field() ?><input type="hidden" name="mid" value="<?= (int)$m['id'] ?>">
+          <button class="btn sm" name="act" value="mash_toggle"><?= $gone ? '되돌리기' : '기록 지우기' ?></button>
+          <button class="btn sm" name="act" value="mash_again" onclick="return confirm('이 판을 없애고 팀이 다시 하게 할까요?\n이 보스의 뒤 판도 함께 없어집니다. 되돌릴 수 없습니다.')">다시 하게 하기</button></form></td>
       </tr>
     <?php endforeach; ?>
     </tbody>
