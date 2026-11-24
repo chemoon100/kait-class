@@ -14,7 +14,7 @@ require_once __DIR__ . '/../guard.php';
 require_once __DIR__ . '/../layout.php';
 $me = need_admin('../');
 
-const SFPC_TABS = ['summary' => '접수 현황', 'teams' => '팀 목록', 'coaches' => '지도교사', 'study' => '공부하기', 'log' => '변경 기록',
+const SFPC_TABS = ['summary' => '접수 현황', 'teams' => '팀 목록', 'coaches' => '지도교사', 'study' => '공부하기', 'arena' => '준비 · 대회', 'log' => '변경 기록',
                   'schools' => '학교 목록', 'settings' => '설정'];
 const SFPC_COACH_ID_RE = '/^[A-Za-z][A-Za-z0-9_.-]{3,19}$/';
 $tab = (string)($_GET['tab'] ?? 'summary');
@@ -309,6 +309,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $t = sfpc_team((int)$r['team_id']);
     if ($t) sfpc_log((int)$t['id'], (int)$t['coach_user_id'], $me, 'study', '연타 기록(보스 ' . $r['boss'] . ' · ' . $r['cnt'] . '회)을 없애 다시 할 수 있게 함');
     redirect_with('그 기록을 없앴습니다. 팀이 지도에서 그 보스에게 다시 도전할 수 있습니다.');
+  }
+  /* ── 준비하기 · 도전하기 ── */
+  if ($act === 'ready_conf') {
+    setting_set('sfpc_ready_min', (string)max(10, min(300, (int)($_POST['ready_min'] ?? 90))));
+    setting_set('sfpc_ready_per_day', (string)max(1, min(20, (int)($_POST['ready_per_day'] ?? 3))));
+    redirect_with('준비하기 설정을 저장했습니다. 이미 시작한 판은 그대로입니다.');
+  }
+  if ($act === 'ready_add') {
+    $title = sfpc_clean((string)($_POST['title'] ?? ''), 40);
+    if (ustrlen($title) < 2) redirect_with('', '세트 이름을 적어 주세요.');
+    $ids = array_keys(sfpc_ready_sets());
+    db()->prepare("INSERT INTO sets(set_type, title, start_at, end_at, active, langs, show_diff, visibility, no_paste, created_at) VALUES('lesson',?,NULL,NULL,1,?,0,'all',0,?)")
+        ->execute([$title, implode(',', array_keys(langs())), now()]);
+    $ids[] = (int)db()->lastInsertId(); setting_set('sfpc_ready_sets', implode(',', $ids));
+    redirect_with('"' . $title . '" 세트를 만들었습니다. 문제를 담아 주세요.');
+  }
+  if ($act === 'ready_drop') {
+    $ids = array_keys(sfpc_ready_sets()); $sid = (int)($_POST['set'] ?? 0);
+    if (count($ids) < 2) redirect_with('', '세트는 하나 이상 있어야 합니다.');
+    setting_set('sfpc_ready_sets', implode(',', array_diff($ids, [$sid])));
+    redirect_with('세트를 준비하기에서 뺐습니다. 묶음과 지난 기록은 지워지지 않았습니다.');
+  }
+  if ($act === 'arena_fill') {            /* 시험용 — 공부하기의 문제를 그대로 담는다 */
+    $sid = (int)($_POST['set'] ?? 0);
+    if (sfpc_set_stage($sid) !== 'sfpc_ready' && sfpc_set_stage($sid) !== 'sfpc_contest') redirect_with('', '묶음을 찾지 못했습니다.');
+    if (sfpc_set_problems($sid)) redirect_with('', '이미 문제가 담겨 있습니다.');
+    $ps = sfpc_study_problems(); if (!$ps) redirect_with('', '공부하기에 문제가 없습니다. 먼저 공부하기 탭에서 연습용 문제를 넣어 주세요.');
+    foreach ($ps as $i => $pp) db()->prepare("INSERT INTO set_problems(set_id, problem_id, required_ac, sort) VALUES(?,?,1,?)")->execute([$sid, $pp['id'], $i + 1]);
+    redirect_with('공부하기 문제 ' . count($ps) . '개를 시험용으로 담았습니다. 실제 문제가 준비되면 바꿔 주세요.');
+  }
+  if ($act === 'run_drop') {              /* 판 하나를 없앤다 — 그 팀의 오늘 도전이 하나 돌아온다 */
+    db()->prepare("DELETE FROM sfpc_runs WHERE id = ? AND contest = ?")->execute([(int)($_POST['rid'] ?? 0), SFPC_CONTEST]);
+    redirect_with('그 판을 없앴습니다.');
+  }
+  if ($act === 'contest_conf') {
+    $from = str_replace('T', ' ', trim((string)($_POST['contest_from'] ?? ''))); $to = str_replace('T', ' ', trim((string)($_POST['contest_to'] ?? '')));
+    $set = sfpc_arena_set('sfpc_contest_set', 'SFPC 도전하기', 'assessment');
+    if ($from === '' && $to === '') {
+      setting_set('sfpc_contest_from', ''); setting_set('sfpc_contest_to', '');
+      db()->prepare("UPDATE sets SET start_at = NULL, end_at = NULL WHERE id = ?")->execute([$set['id']]);
+      redirect_with('대회 일시를 비웠습니다.');
+    }
+    if (!sfpc_ts($from) || !sfpc_ts($to) || sfpc_ts($to) <= sfpc_ts($from)) redirect_with('', '시작과 끝을 날짜와 시각으로 넣어 주세요. 끝이 시작보다 뒤여야 합니다.');
+    $len = intdiv(sfpc_ts($to) - sfpc_ts($from), 60);
+    $fz = ($_POST['freeze'] ?? 'off') === 'on' ? max(1, min($len, (int)($_POST['freeze_min'] ?? 60))) : 0;
+    setting_set('sfpc_contest_from', substr($from, 0, 16)); setting_set('sfpc_contest_to', substr($to, 0, 16)); setting_set('sfpc_freeze_min', (string)$fz);
+    /* 묶음의 기간도 맞춘다 — 대회 시간 밖의 제출은 채점 서버가 받지 않는다 */
+    db()->prepare("UPDATE sets SET start_at = ?, end_at = ? WHERE id = ?")->execute([substr($from, 0, 16), date('Y-m-d H:i', sfpc_ts($to) - 60), $set['id']]);
+    redirect_with('대회 일시를 저장했습니다. ' . ($fz ? '끝나기 ' . $fz . '분 전(' . date('H:i', sfpc_ts($to) - $fz * 60) . ')부터 스코어보드가 업니다.' : '스코어보드는 얼리지 않습니다.'));
+  }
+  if ($act === 'board_final') {
+    $on = sfpc_setting('sfpc_board_final') === '1';
+    setting_set('sfpc_board_final', $on ? '0' : '1');
+    sfpc_log(null, null, $me, 'admin', $on ? '스코어보드를 다시 얼림' : '스코어보드 최종 결과 공개');
+    redirect_with($on ? '다시 얼렸습니다.' : '최종 결과를 공개했습니다. 스코어보드에 모든 제출의 결과가 보입니다.');
   }
   if ($act === 'study_conf') {
     setting_set('sfpc_boss_every', (string)max(1, min(50, (int)($_POST['boss_every'] ?? 10))));
@@ -773,6 +828,79 @@ sfpc_css('../');
     </tbody>
   </table></div>
   <?php endif; ?>
+
+<?php elseif ($tab === 'arena'):
+  $rsets = sfpc_ready_sets(); $cset = sfpc_arena_set('sfpc_contest_set', 'SFPC 도전하기', 'assessment'); $ct = sfpc_contest_time();
+  $dtv = fn(string $k) => str_replace(' ', 'T', sfpc_setting($k)); $fzm = (int)sfpc_setting('sfpc_freeze_min'); $final = sfpc_setting('sfpc_board_final') === '1';
+  $sw = fn(string $k) => sfpc_setting($k) === '1' ? '<b style="color:#0F6E56">공개</b>' : '<b>준비 중</b>'; ?>
+  <div class="note info">문제와 채점은 기존 "수업 · 평가" 묶음을 그대로 씁니다. 문제는 <b>잠근 채</b>(문제 모음에 안 보이게) 만들어 묶음에 담아 주세요.
+    화면 공개는 설정 탭입니다 — 준비하기 <?= $sw('sfpc_ready_open') ?> · 도전하기 <?= $sw('sfpc_contest_open') ?> · 스코어보드 <?= $sw('sfpc_board_open') ?></div>
+
+  <h2 style="font-size:17px; margin:22px 0 10px">준비하기 <span class="small muted" style="font-weight:400">· 모의 대회 · <a href="../sfpc_ready.php" target="_blank" rel="noopener">화면 보기</a></span></h2>
+  <form method="post" class="sfpc-rowform" style="gap:10px; flex-wrap:wrap">
+    <?= sfpc_csrf_field() ?><input type="hidden" name="act" value="ready_conf">
+    <label class="small">한 판 <input type="number" name="ready_min" min="10" max="300" value="<?= sfpc_ready_min() ?>" style="width:76px"> 분</label>
+    <label class="small">하루 <input type="number" name="ready_per_day" min="1" max="20" value="<?= sfpc_ready_per_day() ?>" style="width:64px"> 판 (자정에 다시 참)</label>
+    <button class="btn sm">저장</button>
+  </form>
+  <div class="tablewrap" style="margin-top:12px"><table class="list">
+    <thead><tr><th>문제 세트</th><th class="num">문제</th><th class="num">한 판 수</th><th></th></tr></thead><tbody>
+    <?php foreach ($rsets as $sid => $rs): $np = count(sfpc_set_problems($sid)); ?>
+      <tr><td><b><?= h($rs['title']) ?></b></td><td class="num"><?= $np ?></td>
+        <td class="num"><?= (int)col("SELECT COUNT(*) FROM sfpc_runs WHERE contest = ? AND set_id = ?", [SFPC_CONTEST, $sid]) ?></td>
+        <td><a class="btn sm" href="set.php?id=<?= (int)$sid ?>">문제 넣기 · 이름 바꾸기</a>
+          <form method="post" style="display:inline"><?= sfpc_csrf_field() ?><input type="hidden" name="set" value="<?= (int)$sid ?>">
+            <?php if (!$np): ?><button class="btn sm" name="act" value="arena_fill">공부하기 문제 담기 (시험용)</button><?php endif; ?>
+            <?php if (count($rsets) > 1): ?><button class="btn sm" name="act" value="ready_drop" onclick="return confirm('이 세트를 준비하기에서 뺄까요? 묶음과 기록은 남습니다.')">빼기</button><?php endif; ?></form></td></tr>
+    <?php endforeach; ?></tbody></table></div>
+  <form method="post" class="sfpc-rowform" style="margin-top:10px; gap:8px"><?= sfpc_csrf_field() ?><input type="hidden" name="act" value="ready_add">
+    <input type="text" name="title" maxlength="40" placeholder="새 세트 이름 (예: 2025 기출)" style="max-width:260px"><button class="btn sm">세트 추가</button></form>
+  <?php $runs = all("SELECT r.*, t.team_name, t.account_user_id FROM sfpc_runs r JOIN sfpc_teams t ON t.id = r.team_id WHERE r.contest = ? ORDER BY r.id DESC LIMIT 100", [SFPC_CONTEST]); ?>
+  <?php if ($runs): ?>
+  <details style="margin-top:12px"><summary class="small">최근 판 <?= count($runs) ?>개 보기</summary>
+  <div class="tablewrap" style="margin-top:8px"><table class="list"><thead><tr><th>시작</th><th>팀</th><th>세트</th><th class="num">맞힌 문제</th><th class="num">벌점</th><th></th></tr></thead><tbody>
+    <?php foreach ($runs as $r): $x = sfpc_icpc_one((int)$r['account_user_id'], (int)$r['set_id'], strtotime($r['started_at']), strtotime(sfpc_run_end($r))); ?>
+      <tr><td class="small"><?= h(substr($r['started_at'], 5, 11)) ?><?= $r['ended_at'] !== '' ? ' (포기)' : (strtotime($r['ends_at']) > time() ? ' (진행 중)' : '') ?></td><td><?= h($r['team_name']) ?></td><td><?= h($rsets[(int)$r['set_id']]['title'] ?? '–') ?></td>
+        <td class="num"><?= (int)$x['solved'] ?></td><td class="num"><?= (int)$x['penalty'] ?></td>
+        <td><form method="post" style="display:inline"><?= sfpc_csrf_field() ?><input type="hidden" name="rid" value="<?= (int)$r['id'] ?>">
+          <button class="btn sm" name="act" value="run_drop" onclick="return confirm('이 판을 없앨까요? 오늘 판이면 그 팀의 도전이 하나 돌아옵니다. 되돌릴 수 없습니다.')">판 없애기</button></form></td></tr>
+    <?php endforeach; ?></tbody></table></div></details>
+  <?php endif; ?>
+
+  <h2 style="font-size:17px; margin:30px 0 10px">도전하기 (본 대회) <span class="small muted" style="font-weight:400">· <a href="../sfpc_contest.php" target="_blank" rel="noopener">화면 보기</a> · <a href="../sfpc_board.php?live=1" target="_blank" rel="noopener">스코어보드(실제 순위)</a></span></h2>
+  <p class="small" style="margin:0 0 10px">문제 <b><?= count(sfpc_set_problems((int)$cset['id'])) ?></b>개 · <a class="btn sm" href="set.php?id=<?= (int)$cset['id'] ?>">문제 넣기 · 순서 바꾸기</a>
+    <?php if (!sfpc_set_problems((int)$cset['id'])): ?><form method="post" style="display:inline"><?= sfpc_csrf_field() ?><input type="hidden" name="set" value="<?= (int)$cset['id'] ?>"><button class="btn sm" name="act" value="arena_fill">공부하기 문제 담기 (시험용)</button></form><?php endif; ?>
+    · 상태: <b><?= ['unset' => '일시 미정', 'before' => '시작 전', 'open' => '진행 중', 'after' => '끝남'][$ct['state']] ?></b></p>
+  <form method="post" class="sfpc-form" style="max-width:640px">
+    <?= sfpc_csrf_field() ?><input type="hidden" name="act" value="contest_conf">
+    <fieldset><legend>대회 일시</legend>
+      <div class="row">
+        <div class="field"><label for="cf">시작</label><input type="datetime-local" id="cf" name="contest_from" value="<?= h($dtv('sfpc_contest_from')) ?>"></div>
+        <div class="field"><label for="cto">끝</label><input type="datetime-local" id="cto" name="contest_to" value="<?= h($dtv('sfpc_contest_to')) ?>"></div>
+      </div>
+      <span class="hint">모든 팀이 이 시각에 시작해 이 시각에 끝납니다. 이 시간 밖에는 문제가 열리지 않고 제출도 받지 않습니다. 둘 다 비우면 "일시 미정"입니다.</span>
+    </fieldset>
+    <fieldset><legend>스코어보드 얼리기 (프리즈)</legend>
+      <div class="sfpc-way" style="flex-direction:column">
+        <label><input type="radio" name="freeze" value="off"<?= $fzm ? '' : ' checked' ?>><span><b>얼리지 않음</b><small>끝날 때까지 모든 결과가 그대로 보입니다.</small></span></label>
+        <label><input type="radio" name="freeze" value="on"<?= $fzm ? ' checked' : '' ?>><span><b>끝나기 <input type="number" name="freeze_min" id="fzMin" min="1" max="600" value="<?= $fzm ?: 60 ?>" style="width:74px; display:inline-block"> 분 전부터 얼림</b>
+          <small id="fzHint">그때부터의 제출은 스코어보드에 "?"로만 보입니다. 각 팀은 자기 결과를 계속 봅니다. 대회가 끝나도 얼어 있다가, 아래 "최종 결과 공개"를 누르면 풀립니다.</small></span></label>
+      </div>
+    </fieldset>
+    <div class="btnrow"><button class="btn primary">저장</button></div>
+  </form>
+  <div class="note<?= $final ? ' ok' : '' ?>" style="margin-top:14px; display:flex; gap:14px; align-items:center; flex-wrap:wrap">
+    <span style="flex:1; min-width:240px"><b>지금 스코어보드: <?= $final ? '최종 결과 공개됨' : (sfpc_board_frozen() ? '얼어 있음 (❄ ' . date('H:i', $ct['freeze']) . ' 부터)' : ($ct['freeze'] ? '아직 얼기 전 — ' . date('n월 j일 H:i', $ct['freeze']) . ' 에 업니다' : '얼리지 않음')) ?></b><br>
+      <span class="small">시상식에서 결과를 발표한 뒤 "최종 결과 공개"를 누르면 가려졌던 제출이 모두 드러납니다.</span></span>
+    <form method="post"><?= sfpc_csrf_field() ?><button class="btn <?= $final ? '' : 'primary' ?>" name="act" value="board_final" onclick="return confirm('<?= $final ? '스코어보드를 다시 얼릴까요?' : '최종 결과를 공개할까요? 가려졌던 제출이 모두에게 보입니다.' ?>')"><?= $final ? '다시 얼리기' : '최종 결과 공개' ?></button></form>
+  </div>
+  <script>
+  (function () { var to = document.getElementById('cto'), m = document.getElementById('fzMin'), h = document.getElementById('fzHint'), base = h.textContent;
+    function up() { var t = new Date(to.value), n = parseInt(m.value, 10); if (isNaN(t) || !(n > 0)) { h.textContent = base; return; }
+      var f = new Date(t - n * 60000), p = function (x) { return (x < 10 ? '0' : '') + x; };
+      h.textContent = '→ ' + (f.getMonth() + 1) + '월 ' + f.getDate() + '일 ' + p(f.getHours()) + ':' + p(f.getMinutes()) + ' 부터 얼립니다. ' + base; }
+    to.addEventListener('input', up); m.addEventListener('input', up); up(); })();
+  </script>
 
 <?php elseif ($tab === 'log'):
   /* ── 변경 기록 ── */

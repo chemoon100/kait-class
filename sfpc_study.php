@@ -58,8 +58,6 @@ $pct    = $need ? (int)floor($got * 100 / count($need)) : 0;
 $every  = sfpc_boss_every();
 $mash   = $team ? sfpc_mash_rows((int)$team['id']) : [];
 $passed = $team ? sfpc_boss_passed((int)$team['id']) : PHP_INT_MAX;   /* 운영진 미리 보기는 모두 열려 있다 */
-$notices = all("SELECT id, title, body, pinned, created_at FROM notices WHERE active = 1 ORDER BY pinned DESC, id DESC LIMIT 8");
-$noticeTop = $notices ? max(array_map(fn($n) => (int)$n['id'], $notices)) : 0;
 $char   = $team ? sfpc_char_of($team) : sfpc_char_default((int)$u['id']);
 
 if (($_GET['view'] ?? '') === 'list'): ?>
@@ -121,11 +119,7 @@ foreach ($probs as $i => $p) {
   <?php if (!$probs): ?>
     <div class="sfpc-world-empty">문제를 준비하고 있습니다. 곧 올라옵니다.</div>
   <?php else: ?>
-  <button type="button" class="sfpc-nbox" id="nbox" data-top="<?= $noticeTop ?>" data-key="sfpc_notice_seen_<?= (int)$u['id'] ?>" aria-haspopup="dialog">
-    <span class="ic" aria-hidden="true">!</span>
-    <span class="tx"><b>공지사항</b><i id="nboxSub"><?= $notices ? h($notices[0]['title']) : '아직 공지가 없습니다' ?></i></span>
-    <em id="nboxNew" hidden>새 공지를 확인하세요!</em>
-  </button>
+  <?php sfpc_notice_box($u, 'wm'); ?>
   <div class="sfpc-world-map">
     <canvas id="wm" tabindex="0" aria-label="공부하기 지도. 방향키로 칸을 옮기고 Enter 로 엽니다. 목록으로 보려면 위쪽의 목록을 누르세요."></canvas>
   </div>
@@ -136,39 +130,6 @@ foreach ($probs as $i => $p) {
   <p class="sfpc-world-help">방향키 ← ↑ ↓ → 로 이동 · Enter 로 열기 · 칸을 눌러도 됩니다</p>
   <?php endif; ?>
 </div>
-<div class="sfpc-nmodal" id="nmodal" role="dialog" aria-modal="true" aria-labelledby="nmodalH" hidden>
-  <div class="box">
-    <div class="h"><b id="nmodalH">공지사항</b><button type="button" id="nmodalX" aria-label="닫기">닫기 ✕</button></div>
-    <div class="list">
-      <?php if (!$notices): ?><p class="none">아직 공지가 없습니다.</p><?php endif; ?>
-      <?php foreach ($notices as $n): ?>
-        <article data-id="<?= (int)$n['id'] ?>">
-          <h3><?= !empty($n['pinned']) ? '<span>고정</span>' : '' ?><?= h($n['title']) ?></h3>
-          <time><?= h(substr((string)$n['created_at'], 0, 16)) ?></time>
-          <div class="md"><?= md((string)$n['body']) ?></div>
-        </article>
-      <?php endforeach; ?>
-    </div>
-  </div>
-</div>
-<script>
-(function () {
-  'use strict';
-  var box = document.getElementById('nbox'), modal = document.getElementById('nmodal'); if (!box) return;
-  var top = parseInt(box.dataset.top, 10) || 0, key = box.dataset.key, seen = 0;
-  try { seen = parseInt(localStorage.getItem(key) || '0', 10) || 0; } catch (e) {}
-  function mark() {
-    var fresh = top > seen; box.classList.toggle('new', fresh); document.getElementById('nboxNew').hidden = !fresh;
-    modal.querySelectorAll('article').forEach(function (a) { a.classList.toggle('new', parseInt(a.dataset.id, 10) > seen); });
-  }
-  function close() { modal.hidden = true; seen = top; try { localStorage.setItem(key, String(top)); } catch (e) {} mark(); var c = document.getElementById('wm'); (c || box).focus(); }
-  box.addEventListener('click', function () { modal.hidden = false; document.getElementById('nmodalX').focus(); });
-  document.getElementById('nmodalX').addEventListener('click', close);
-  modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) close(); });
-  mark();
-})();
-</script>
 <?php if ($probs): ?>
 <script src="<?= asset('sfpc_char.js') ?>"></script>
 <script src="<?= asset('sfpc_boss.js') ?>"></script>

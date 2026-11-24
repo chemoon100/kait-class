@@ -175,7 +175,7 @@ sfpc_css();
     if (isset(SFPC_QNA_KIND[$k])) { $w[] = 'q.kind = ?'; $a[] = $k; }
   } else { [$sw, $sa] = sfpc_qna_scope($u); $w[] = $sw; $a = array_merge($a, $sa); }
   $rows = all("SELECT q.*, (SELECT COUNT(*) FROM sfpc_qna_msg m WHERE m.qna_id = q.id) AS n FROM sfpc_qna q WHERE " . implode(' AND ', $w)
-            . " ORDER BY " . ($staff && $f === 'wait' ? 'q.updated_at ASC' : 'q.updated_at DESC') . " LIMIT 300", $a);
+            . " ORDER BY " . ($staff && $f === 'wait' ? 'q.updated_at ASC, q.id ASC' : 'q.updated_at DESC, q.id DESC') . " LIMIT 300", $a);
   if ($staff):
     $cnt = fn(string $kk) => (int)col("SELECT COUNT(*) FROM sfpc_qna q WHERE q.contest = ? AND q.closed = 0 AND q.last_by = 'user'" . ($kk !== '' ? " AND q.kind = " . db()->quote($kk) : ''), [SFPC_CONTEST]);
     $lnk = fn(string $ff, string $kk) => 'sfpc_ask.php?f=' . $ff . '&amp;k=' . ($kk === '' ? 'all' : $kk); ?>

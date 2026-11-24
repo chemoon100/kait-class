@@ -14,7 +14,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib.php';
 
 /* 표 구조를 바꿀 때마다 1씩 올린다 */
-const SFPC_SCHEMA = 10;
+const SFPC_SCHEMA = 11;
 
 /* 올해 대회. 내년에는 이 값과 설정만 바꾸면 접수를 새로 받을 수 있다. */
 const SFPC_CONTEST = '2026';
@@ -68,6 +68,14 @@ const SFPC_DEFAULTS = [
   'sfpc_study_open'   => '1',
   'sfpc_boss_every'   => '2',                    // 공부하기에서 문제 몇 개마다 보스(연타 도전)를 둘지
   'sfpc_mash_sec'     => '20',                   // 연타 한 판의 길이(초)                    // 공부하기 공개
+  'sfpc_ready_min'    => '90',                   // 준비하기 한 판의 길이(분)
+  'sfpc_ready_per_day' => '3',                   // 준비하기 하루 도전 횟수 (자정에 다시 찬다)
+  'sfpc_ready_sets'   => '',                     // 준비하기 문제 세트(묶음 번호, 쉼표로). 비면 처음 들어올 때 하나 만든다
+  'sfpc_contest_set'  => '',                     // 도전하기(본 대회) 묶음 번호
+  'sfpc_contest_from' => '',                     // 본 대회 시작 · 끝 (YYYY-MM-DD HH:MM)
+  'sfpc_contest_to'   => '',
+  'sfpc_freeze_min'   => '60',                   // 스코어보드를 끝나기 몇 분 전부터 얼릴지. 0 이면 얼리지 않는다
+  'sfpc_board_final'  => '0',                    // 1 이면 얼린 것을 풀고 최종 결과를 보여 준다
   'sfpc_ready_open'   => '0',                    // 준비하기 공개
   'sfpc_menu_on'      => '1',                    // 위쪽 메뉴에 SFPC 보이기
   'sfpc_landing_on'   => '1',                    // 접수 전 · 접수 중에 첫 화면을 SFPC 안내로 (sfpc_landing.php)
@@ -242,6 +250,11 @@ if ((int)sfpc_setting('sfpc_schema') !== SFPC_SCHEMA) {
     id INTEGER PRIMARY KEY AUTOINCREMENT, qna_id INTEGER NOT NULL, user_id INTEGER, by_staff INTEGER NOT NULL DEFAULT 0,
     author TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL)");
   db()->exec("CREATE INDEX IF NOT EXISTS idx_sfpc_qna_msg ON sfpc_qna_msg(qna_id, id)");
+  /* 11 — 준비하기의 한 판. 시작할 때 줄이 생기고 ends_at 에 저절로 끝난다. ended_at 이 있으면 그 전에 포기한 판이다. */
+  db()->exec("CREATE TABLE IF NOT EXISTS sfpc_runs(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, contest TEXT NOT NULL, team_id INTEGER NOT NULL, set_id INTEGER NOT NULL,
+    started_at TEXT NOT NULL, ends_at TEXT NOT NULL, ended_at TEXT NOT NULL DEFAULT '')");
+  db()->exec("CREATE INDEX IF NOT EXISTS idx_sfpc_runs ON sfpc_runs(contest, team_id, started_at)");
   /* 학교 목록이 비어 있으면 함께 넣어 둔 목록으로 채운다 — 설치만 하면 학교 찾기가 바로 된다 */
   if ((int)db()->query("SELECT COUNT(*) FROM sfpc_schools")->fetchColumn() === 0 && sfpc_schools_load_bundled() > 0) {
     setting_set('sfpc_schools_at', now());
@@ -678,6 +691,19 @@ function sfpc_site_gate(?array $u, string $nav, string $root = ''): string {
   $study = (int)sfpc_setting('sfpc_study_set');
   $inStudy = $study > 0 && (int)($_GET['set'] ?? 0) === $study && $page === 'problem.php';
   if ($inStudy) $nav = 'sfpc_study';
+  /* 준비하기 · 도전하기의 문제 — 판이 돌아가는 동안(대회 중)에만 열린다 */
+  $stage = $page === 'problem.php' ? sfpc_set_stage((int)($_GET['set'] ?? 0)) : '';
+  if ($stage === 'sfpc_ready' || $stage === 'sfpc_contest') {
+    if (is_admin($u)) return $stage;
+    $team = sfpc_my_team($u);
+    if ($stage === 'sfpc_ready') {
+      $run = ($team && sfpc_setting('sfpc_ready_open') === '1') ? sfpc_run_active((int)$team['id']) : null;
+      if (!$run || (int)$run['set_id'] !== (int)$_GET['set']) { header('Location: ' . $root . 'sfpc_ready.php'); exit; }
+    } elseif (!$team || $team['status'] !== 'submitted' || sfpc_setting('sfpc_contest_open') !== '1' || sfpc_contest_time()['state'] !== 'open') {
+      header('Location: ' . $root . 'sfpc_contest.php'); exit;
+    }
+    return $stage;
+  }
   if (is_admin($u)) return $nav;
   if ($inStudy) {
     if (sfpc_setting('sfpc_study_open') !== '1') { header('Location: ' . $root . 'sfpc_study.php'); exit; }
@@ -729,6 +755,7 @@ function sfpc_demo_problems(): int {
    공부하기(와 그 안의 문제 풀이 화면)에서는 공용 메뉴 대신 이 띠가 나온다. 그려 넣었으면 true.
    운영진이 교사 화면으로 볼 때는 공용 메뉴를 그대로 둔다 (수정 · 테스트케이스 버튼을 써야 하므로). */
 function sfpc_stage_bar(?array $u, string $nav, string $root = ''): bool {
+  if (sfpc_site() && $u && ($nav === 'sfpc_ready' || $nav === 'sfpc_contest')) return sfpc_arena_bar($u, $nav, $root);
   if (!sfpc_site() || $nav !== 'sfpc_study' || !$u) return false;
   $page = basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
   if (!in_array($page, ['sfpc_study.php', 'sfpc_boss.php', 'sfpc_rank.php', 'sfpc_grad.php', 'problem.php'], true)) return false;
@@ -760,6 +787,204 @@ function sfpc_stage_bar(?array $u, string $nav, string $root = ''): bool {
   echo '<a class="me" href="' . h($root . ($team ? 'sfpc_me.php' : (is_admin($u) ? 'admin/sfpc.php?tab=study' : 'sfpc_teams.php'))) . '">'
      . h($team ? $team['team_name'] : ($u['name'] !== '' ? $u['name'] : $u['login_id'])) . '</a>'
      . '<a href="' . h($root) . 'logout.php">로그아웃</a></div></header>';
+  return true;
+}
+
+/* ── 준비하기 · 도전하기 · 스코어보드 ─────────────
+   문제와 채점은 KAIT-CLASS 의 묶음을 그대로 쓴다. 여기서는 "언제부터 언제까지 낸 제출을 셀지"만 정한다.
+   · 준비하기: 팀이 시작을 누르면 그때부터 sfpc_ready_min 분. 하루 sfpc_ready_per_day 판, 자정에 다시 찬다. 순위표는 없다.
+   · 도전하기: 모든 팀이 같은 시각에 시작해 같은 시각에 끝난다 (묶음의 시작 · 끝과 맞춘다).
+   · 점수는 ICPC 방식 — 맞힌 문제 수가 많은 팀이 위, 같으면 벌점이 적은 팀이 위.
+     벌점 = 맞힌 문제마다 (시작부터 맞힐 때까지의 분 + 그 전에 틀린 횟수 × 20). 못 맞힌 문제의 오답은 세지 않는다.
+     컴파일 오류(CE)와 채점기 오류(IE)는 오답으로 세지 않는다. */
+const SFPC_WRONG_MIN = 20;
+function sfpc_arena_set(string $key, string $title, string $type): array {
+  $id = (int)sfpc_setting($key);
+  $s  = $id ? one("SELECT * FROM sets WHERE id = ?", [$id]) : null;
+  if ($s) return $s;
+  db()->prepare("INSERT INTO sets(set_type, title, start_at, end_at, active, langs, show_diff, visibility, no_paste, created_at) VALUES(?,?,NULL,NULL,1,?,0,'all',0,?)")
+      ->execute([$type, $title, implode(',', array_keys(langs())), now()]);
+  $id = (int)db()->lastInsertId();
+  setting_set($key, (string)$id);
+  return one("SELECT * FROM sets WHERE id = ?", [$id]);
+}
+function sfpc_set_problems(int $setId): array {
+  return all("SELECT p.id, p.prob_no, p.title FROM set_problems sp JOIN problems p ON p.id = sp.problem_id WHERE sp.set_id = ? ORDER BY sp.sort, sp.id", [$setId]);
+}
+function sfpc_letter(int $i): string { return $i < 26 ? chr(65 + $i) : chr(65 + intdiv($i, 26) - 1) . chr(65 + $i % 26); }
+/* 준비하기의 문제 세트들. 하나도 없으면 첫 세트를 만든다. */
+function sfpc_ready_sets(): array {
+  $out = [];
+  foreach (array_filter(array_map('intval', explode(',', sfpc_setting('sfpc_ready_sets')))) as $id) {
+    $s = one("SELECT * FROM sets WHERE id = ?", [$id]); if ($s) $out[$id] = $s;
+  }
+  if (!$out) {
+    db()->prepare("INSERT INTO sets(set_type, title, start_at, end_at, active, langs, show_diff, visibility, no_paste, created_at) VALUES('lesson',?,NULL,NULL,1,?,0,'all',0,?)")
+        ->execute(['SFPC 준비하기 1', implode(',', array_keys(langs())), now()]);
+    $id = (int)db()->lastInsertId(); setting_set('sfpc_ready_sets', (string)$id);
+    $out[$id] = one("SELECT * FROM sets WHERE id = ?", [$id]);
+  }
+  return $out;
+}
+function sfpc_ready_min(): int { return max(10, min(300, (int)sfpc_setting('sfpc_ready_min'))); }
+function sfpc_ready_per_day(): int { return max(1, min(20, (int)sfpc_setting('sfpc_ready_per_day'))); }
+function sfpc_run_end(array $r): string { return $r['ended_at'] !== '' ? $r['ended_at'] : $r['ends_at']; }
+/* 지금 하고 있는 판 (없으면 null) */
+function sfpc_run_active(int $teamId): ?array {
+  return one("SELECT * FROM sfpc_runs WHERE contest = ? AND team_id = ? AND ended_at = '' AND ends_at > ? ORDER BY id DESC", [SFPC_CONTEST, $teamId, now()]);
+}
+function sfpc_runs_today(int $teamId): int {
+  return (int)col("SELECT COUNT(*) FROM sfpc_runs WHERE contest = ? AND team_id = ? AND started_at >= ?", [SFPC_CONTEST, $teamId, date('Y-m-d') . ' 00:00:00']);
+}
+/* 본 대회의 때. ['from' => ts, 'to' => ts, 'state' => 'unset'|'before'|'open'|'after', 'freeze' => ts(0 이면 얼리지 않음)] */
+function sfpc_contest_time(): array {
+  $f = sfpc_ts(sfpc_setting('sfpc_contest_from')); $t = sfpc_ts(sfpc_setting('sfpc_contest_to')); $now = time();
+  if (!$f || !$t || $t <= $f) return ['from' => 0, 'to' => 0, 'state' => 'unset', 'freeze' => 0];
+  $fm = max(0, (int)sfpc_setting('sfpc_freeze_min'));
+  return ['from' => $f, 'to' => $t, 'state' => $now < $f ? 'before' : ($now >= $t ? 'after' : 'open'), 'freeze' => $fm > 0 ? max($f, $t - $fm * 60) : 0];
+}
+/* 스코어보드가 지금 얼어 있는지 — 얼리는 때가 지났고 아직 최종 결과를 공개하지 않았을 때 */
+function sfpc_board_frozen(): bool {
+  $c = sfpc_contest_time();
+  return $c['freeze'] > 0 && time() >= $c['freeze'] && sfpc_setting('sfpc_board_final') !== '1';
+}
+/* ICPC 점수. $from ~ $to (초) 사이에 그 묶음에 낸 제출만 센다. $hideFrom 이 있으면 그때부터의 제출은 결과를 감춘다(얼림).
+   돌려주는 값: [계정 번호 => ['solved', 'penalty', 'cells' => [문제 번호 => ['ok', 'tries', 'min', 'pend', 'first']]]]
+   $userIds 를 주면 그 계정만. */
+function sfpc_icpc(int $setId, int $from, int $to, int $hideFrom = 0, ?array $userIds = null): array {
+  $w = "s.set_id = ? AND s.created_at >= ? AND s.created_at < ?"; $a = [$setId, date('Y-m-d H:i:s', $from), date('Y-m-d H:i:s', $to)];
+  if ($userIds !== null) { if (!$userIds) return []; $w .= " AND s.user_id IN (" . implode(',', array_map('intval', $userIds)) . ")"; }
+  $out = []; $first = [];
+  foreach (all("SELECT s.id, s.user_id, s.problem_id, s.state, s.verdict, s.created_at FROM submissions s WHERE $w ORDER BY s.created_at, s.id", $a) as $r) {
+    $uid = (int)$r['user_id']; $pid = (int)$r['problem_id']; $ts = strtotime($r['created_at']);
+    $c = &$out[$uid]['cells'][$pid];
+    if ($c === null) $c = ['ok' => false, 'tries' => 0, 'min' => 0, 'pend' => 0, 'first' => false];
+    if ($c['ok']) { unset($c); continue; }
+    if (($hideFrom > 0 && $ts >= $hideFrom) || !in_array($r['state'], ['done', 'error'], true)) { $c['pend']++; unset($c); continue; }
+    if ($r['verdict'] === 'AC') { $c['ok'] = true; $c['min'] = intdiv(max(0, $ts - $from), 60); if (!isset($first[$pid])) { $first[$pid] = true; $c['first'] = true; } }
+    elseif (!in_array((string)$r['verdict'], ['CE', 'IE', ''], true)) $c['tries']++;
+    unset($c);
+  }
+  foreach ($out as $uid => &$o) {
+    $o['solved'] = 0; $o['penalty'] = 0;
+    foreach ($o['cells'] as $c) if ($c['ok']) { $o['solved']++; $o['penalty'] += $c['min'] + SFPC_WRONG_MIN * $c['tries']; }
+  }
+  unset($o);
+  return $out;
+}
+/* 한 계정의 점수 (제출이 없어도 빈 값으로) */
+function sfpc_icpc_one(int $userId, int $setId, int $from, int $to): array {
+  return sfpc_icpc($setId, $from, $to, 0, [$userId])[$userId] ?? ['solved' => 0, 'penalty' => 0, 'cells' => []];
+}
+/* 스코어보드에 놓을 줄들. $live 가 참이면 얼리지 않은 실제 점수 (운영진 확인용).
+   · 학생 팀만 나온다. 교사 · 예비교사 팀(옵저버)은 대회에는 참가하지만 여기에는 나오지 않는다.
+   · 정식참가자만 순위를 매긴다. 시범참가자는 순위 없이 아래에 따로 놓는다. */
+function sfpc_board(bool $live = false): array {
+  $c = sfpc_contest_time(); $setId = (int)sfpc_setting('sfpc_contest_set');
+  $out = ['c' => $c, 'probs' => $setId ? sfpc_set_problems($setId) : [], 'rows' => [], 'frozen' => false];
+  if ($c['state'] === 'unset' || !$setId) return $out;
+  $out['frozen'] = !$live && sfpc_board_frozen();
+  $teams = all("SELECT * FROM sfpc_teams WHERE contest = ? AND status = 'submitted' AND kind = 'student' AND account_user_id > 0", [SFPC_CONTEST]);
+  $sc = $c['state'] === 'before' ? [] : sfpc_icpc($setId, $c['from'], $c['to'], $out['frozen'] ? $c['freeze'] : 0, array_map(fn($t) => (int)$t['account_user_id'], $teams));
+  foreach ($teams as $t) {
+    $x = $sc[(int)$t['account_user_id']] ?? ['solved' => 0, 'penalty' => 0, 'cells' => []];
+    $out['rows'][] = ['team' => $t, 'ranked' => $t['track'] === 'participant', 'solved' => $x['solved'], 'penalty' => $x['penalty'], 'cells' => $x['cells'], 'rank' => 0];
+  }
+  usort($out['rows'], fn($a, $b) => [$b['ranked'], $b['solved'], $a['penalty'], $a['team']['team_name']] <=> [$a['ranked'], $a['solved'], $b['penalty'], $b['team']['team_name']]);
+  $rank = 0; $n = 0; $prev = null;
+  foreach ($out['rows'] as &$r) {
+    if (!$r['ranked']) continue;
+    $n++; if ($prev === null || $prev !== [$r['solved'], $r['penalty']]) $rank = $n;
+    $r['rank'] = $rank; $prev = [$r['solved'], $r['penalty']];
+  }
+  unset($r);
+  return $out;
+}
+/* 이 묶음 화면(problem.php?set=…)이 어느 단계의 것인지: 'sfpc_study' | 'sfpc_ready' | 'sfpc_contest' | '' */
+function sfpc_set_stage(int $setId): string {
+  if ($setId <= 0) return '';
+  if ($setId === (int)sfpc_setting('sfpc_study_set')) return 'sfpc_study';
+  if ($setId === (int)sfpc_setting('sfpc_contest_set')) return 'sfpc_contest';
+  if (in_array($setId, array_map('intval', explode(',', sfpc_setting('sfpc_ready_sets'))), true)) return 'sfpc_ready';
+  return '';
+}
+/* 새 공지가 있으면 깜빡이는 상자 + 그 자리에서 읽는 창 (공부하기 지도 · 준비하기 · 도전하기에 놓는다) */
+function sfpc_notice_box(array $u, string $focusId = ''): void {
+  $notices = all("SELECT id, title, body, pinned, created_at FROM notices WHERE active = 1 ORDER BY pinned DESC, id DESC LIMIT 8");
+  $top = $notices ? max(array_map(fn($n) => (int)$n['id'], $notices)) : 0; ?>
+  <button type="button" class="sfpc-nbox" id="nbox" data-top="<?= $top ?>" data-key="sfpc_notice_seen_<?= (int)$u['id'] ?>" data-focus="<?= h($focusId) ?>" aria-haspopup="dialog">
+    <span class="ic" aria-hidden="true">!</span>
+    <span class="tx"><b>공지사항</b><i id="nboxSub"><?= $notices ? h($notices[0]['title']) : '아직 공지가 없습니다' ?></i></span>
+    <em id="nboxNew" hidden>새 공지를 확인하세요!</em>
+  </button>
+  <div class="sfpc-nmodal" id="nmodal" role="dialog" aria-modal="true" aria-labelledby="nmodalH" hidden>
+    <div class="box">
+      <div class="h"><b id="nmodalH">공지사항</b><button type="button" id="nmodalX" aria-label="닫기">닫기 ✕</button></div>
+      <div class="list">
+        <?php if (!$notices): ?><p class="none">아직 공지가 없습니다.</p><?php endif; ?>
+        <?php foreach ($notices as $n): ?>
+          <article data-id="<?= (int)$n['id'] ?>">
+            <h3><?= !empty($n['pinned']) ? '<span>고정</span>' : '' ?><?= h($n['title']) ?></h3>
+            <time><?= h(substr((string)$n['created_at'], 0, 16)) ?></time>
+            <div class="md"><?= md((string)$n['body']) ?></div>
+          </article>
+        <?php endforeach; ?>
+      </div>
+    </div>
+  </div>
+  <script>
+  (function () {
+    'use strict';
+    var box = document.getElementById('nbox'), modal = document.getElementById('nmodal');
+    var top = parseInt(box.dataset.top, 10) || 0, key = box.dataset.key, seen = 0;
+    try { seen = parseInt(localStorage.getItem(key) || '0', 10) || 0; } catch (e) {}
+    function mark() {
+      var fresh = top > seen; box.classList.toggle('new', fresh); document.getElementById('nboxNew').hidden = !fresh;
+      modal.querySelectorAll('article').forEach(function (a) { a.classList.toggle('new', parseInt(a.dataset.id, 10) > seen); });
+    }
+    function close() { modal.hidden = true; seen = top; try { localStorage.setItem(key, String(top)); } catch (e) {} mark(); var c = box.dataset.focus && document.getElementById(box.dataset.focus); (c || box).focus(); }
+    box.addEventListener('click', function () { modal.hidden = false; document.getElementById('nmodalX').focus(); });
+    document.getElementById('nmodalX').addEventListener('click', close);
+    modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) close(); });
+    mark();
+  })();
+  </script>
+<?php }
+
+/* 준비하기 · 도전하기의 띠 — 남은 시간과 문제 글자(A, B, C…)가 늘 보인다. 팀 계정에게만 (운영진은 공용 메뉴 그대로). */
+function sfpc_arena_bar(array $u, string $nav, string $root): bool {
+  $team = sfpc_my_team($u); if (!$team) return false;
+  $page = basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
+  $home = $nav === 'sfpc_ready' ? 'sfpc_ready.php' : 'sfpc_contest.php';
+  if (!in_array($page, [$home, 'problem.php'], true)) return false;
+  $setId = 0; $end = 0;
+  if ($nav === 'sfpc_ready') { $run = sfpc_run_active((int)$team['id']); if ($run) { $setId = (int)$run['set_id']; $end = strtotime($run['ends_at']); } }
+  else { $c = sfpc_contest_time(); if ($c['state'] === 'open') { $setId = (int)sfpc_setting('sfpc_contest_set'); $end = $c['to']; } }
+  sfpc_css($root);
+  echo '<header class="sfpc-bar"><div class="in"><a class="back" href="' . h($root . ($page === 'problem.php' ? $home : 'index.php')) . '">← ' . ($page === 'problem.php' ? '문제 목록' : 'SFPC') . '</a>'
+     . '<b>' . ($nav === 'sfpc_ready' ? '준비하기' : '도전하기') . '</b>';
+  if ($end) echo '<span class="pill clock" id="sfClock" data-end="' . $end . '" data-now="' . time() . '" data-home="' . h($root . $home) . '">--:--</span>';
+  echo '<span class="g"></span>';
+  if ($setId) foreach (sfpc_set_problems($setId) as $i => $p)
+    echo '<a class="ltr' . ($page === 'problem.php' && (int)($_GET['no'] ?? 0) === (int)$p['prob_no'] ? ' on' : '') . '" href="' . h($root) . 'problem.php?no=' . (int)$p['prob_no'] . '&amp;set=' . $setId . '" title="' . h($p['title']) . '">' . sfpc_letter($i) . '</a>';
+  if ($nav === 'sfpc_contest') echo '<a href="' . h($root) . 'sfpc_board.php">스코어보드</a>';
+  echo '<a href="' . h($root) . 'sfpc_ask.php' . ($page === 'problem.php' ? '?new=prob' : '') . '">문의' . sfpc_qna_dot($u) . '</a>'
+     . '<a class="me" href="' . h($root) . 'sfpc_me.php">' . h($team['team_name']) . '</a><a href="' . h($root) . 'logout.php">로그아웃</a></div></header>';
+  if ($end) { ?>
+  <script>
+  (function () {  /* 남은 시간 — 서버 시각을 기준으로 센다. 끝나면 목록 화면으로 돌아간다 */
+    var el = document.getElementById('sfClock'), end = +el.dataset.end, skew = +el.dataset.now - Date.now() / 1000;
+    function tick() {
+      var left = Math.max(0, Math.round(end - (Date.now() / 1000 + skew))), h = Math.floor(left / 3600), m = Math.floor(left % 3600 / 60), s = left % 60;
+      el.textContent = (h ? h + ':' : '') + (h && m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+      el.classList.toggle('low', left <= 300);
+      if (left <= 0) { clearInterval(t); if (!/sfpc_(ready|contest)\.php/.test(location.pathname)) el.textContent = '끝'; else location.reload(); }
+    }
+    var t = setInterval(tick, 1000); tick();
+  })();
+  </script>
+  <?php }
   return true;
 }
 

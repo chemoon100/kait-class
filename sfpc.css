@@ -470,3 +470,61 @@ table.sfpc-pvlinks td a:hover{text-decoration:none; background:var(--b50)}
 .sfpc-ask-form label{font-weight:700; font-size:13px}
 .sfpc-ask-form textarea{width:100%; margin-top:6px; font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:8px; resize:vertical}
 .sfpc-ask-form .btnrow{margin-top:10px}
+
+/* 준비하기 · 도전하기 · 스코어보드 */
+.sfpc-bar .clock{font-size:15px; background:#0B2A25; min-width:64px; text-align:center}
+.sfpc-bar .clock.low{background:#4A1414; color:#F7C1C1; animation:sfpcBlink 1s steps(2) infinite}
+.sfpc-bar .ltr{display:inline-block; min-width:24px; text-align:center; padding:2px 5px; border:1px solid #3C3489; border-radius:5px}
+.sfpc-bar .ltr.on{background:#5DCAA5; color:#04342C; border-color:#5DCAA5; padding-bottom:2px}
+.sfpc-world-note.ok{border-color:#1D9E75; color:#9FE1CB}
+.sfpc-world-note.bad{border-color:#E24B4A; color:#F7C1C1}
+.sfpc-world-note a, .sfpc-frozen a{color:#FAC775}
+.sfpc-arcade .sfpc-arena-h p b{color:#FAC775}
+.sfpc-coins{display:flex; align-items:center; justify-content:center; gap:10px; margin:6px auto 20px; font-size:13px; color:#AFA9EC}
+.sfpc-coins i{width:26px; height:26px; border-radius:50%; border:3px solid #3C3489; background:#1D1238}
+.sfpc-coins i.on{border-color:#BA7517; background:#FAC775; box-shadow:inset -3px -3px 0 #EF9F27}
+.sfpc-coins span{margin-left:8px} .sfpc-coins b{color:#fff; font-size:16px}
+.sfpc-sets{display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px}
+.sfpc-sets .set{padding:20px; border:2px solid #3C3489; border-radius:12px; background:#1D1238; text-align:center}
+.sfpc-sets h2{margin:0 0 4px; font-size:18px; color:#fff}
+.sfpc-sets p{margin:0; font-size:12px; color:#AFA9EC}
+.sfpc-sets .best{margin:10px 0 14px; color:#CECBF6} .sfpc-sets .best b{color:#5DCAA5; font-size:15px}
+.sfpc-sets .big{font:inherit; font-size:20px; width:100%; padding:16px; border-radius:10px; border:2px solid #5DCAA5; background:#0B2A25; color:#9FE1CB; cursor:pointer}
+.sfpc-sets .big:hover:not(:disabled){background:#5DCAA5; color:#04342C}
+.sfpc-sets .big:disabled{border-color:#3C3489; background:#140A24; color:#6E66A8; cursor:default; font-size:14px}
+.sfpc-plist{list-style:none; margin:0 auto 18px; padding:0; display:grid; gap:8px}
+.sfpc-plist a, .sfpc-plist .a{display:flex; align-items:center; gap:14px; padding:13px 16px; border:2px solid #3C3489; border-radius:10px; background:#1D1238; color:#fff; text-decoration:none}
+.sfpc-plist a:hover{border-color:#7F77DD}
+.sfpc-plist .l{flex:0 0 36px; height:36px; display:flex; align-items:center; justify-content:center; background:#3C3489; border-radius:6px; font-size:17px}
+.sfpc-plist .t{flex:1; min-width:0; font-size:15px}
+.sfpc-plist .s{font-size:12px; color:#AFA9EC; white-space:nowrap}
+.sfpc-plist li.ok a, .sfpc-plist li.ok .a{border-color:#1D9E75} .sfpc-plist li.ok .l{background:#1D9E75; color:#04342C} .sfpc-plist li.ok .s{color:#5DCAA5}
+.sfpc-plist li.bad .l{background:#993C1D} .sfpc-plist li.bad .s{color:#F0997B}
+.sfpc-giveup{margin:0 auto; font-size:12px; color:#8F88C9} .sfpc-giveup summary{cursor:pointer; text-align:center}
+.sfpc-giveup form{margin-top:10px; padding:14px; border:1px dashed #993C1D; border-radius:10px; color:#CECBF6}
+.sfpc-giveup input{width:90px; margin:0 8px}
+.sfpc-h2{font-size:15px; color:#AFA9EC; margin:30px auto 8px}
+.sfpc-runs{width:100%; border-collapse:collapse; font-size:13px; color:#CECBF6}
+.sfpc-runs th, .sfpc-runs td{padding:8px 10px; border-bottom:1px solid #2A2150; text-align:left} .sfpc-runs th{color:#8F88C9; font-weight:400} .sfpc-runs b{color:#5DCAA5}
+.sfpc-count{font-size:64px; text-align:center; color:#FAC775; margin:10px auto 22px; letter-spacing:2px}
+.sfpc-rules{max-width:640px; margin:0 auto; padding:16px 18px 16px 34px; border:1px dashed #3C3489; border-radius:10px; font-size:13px; line-height:1.9; color:#CECBF6}
+.sfpc-frozen{padding:11px 16px; margin-bottom:12px; border:2px solid #378ADD; background:#0C2440; color:#B5D4F4; border-radius:8px; font-size:13px; text-align:center}
+.sfpc-board > *{max-width:1280px}
+.sfpc-board-wrap{overflow-x:auto}
+.sfpc-board table{width:100%; border-collapse:separate; border-spacing:0 4px; font-size:13px}
+.sfpc-board th{padding:6px 8px; color:#8F88C9; font-weight:400; text-align:center; white-space:nowrap}
+.sfpc-board td{padding:6px 8px; background:#1D1238; text-align:center; white-space:nowrap}
+.sfpc-board td:first-child{border-radius:8px 0 0 8px} .sfpc-board td:last-child{border-radius:0 8px 8px 0}
+.sfpc-board .tm{text-align:left; min-width:200px} .sfpc-board td.tm{display:flex; align-items:center; gap:10px}
+.sfpc-board td.tm b{display:block; color:#fff; font-size:14px} .sfpc-board td.tm small{color:#8F88C9; font-size:11px}
+.sfpc-board td.r{font-size:16px; color:#AFA9EC; width:52px} .sfpc-board tr.top td.r{color:#FAC775}
+.sfpc-board td.n b{color:#5DCAA5; font-size:16px}
+.sfpc-board td.p{min-width:46px; color:#6E66A8} .sfpc-board td.p b{display:block; font-size:13px} .sfpc-board td.p small{font-size:10px}
+.sfpc-board td.p.ok{background:#0F6E56; color:#E1F5EE} .sfpc-board td.p.first{background:#1D9E75; color:#04342C; box-shadow:inset 0 0 0 2px #FAC775}
+.sfpc-board td.p.bad{background:#712B13; color:#F5C4B3} .sfpc-board td.p.pend{background:#185FA5; color:#E6F1FB}
+.sfpc-board tr.me td{box-shadow:inset 0 2px 0 #FAC775, inset 0 -2px 0 #FAC775}
+.sfpc-board tr.sep td{background:none; text-align:left; color:#8F88C9; font-size:12px; padding-top:16px}
+.sfpc-board-key{font-size:11px; color:#8F88C9; text-align:center; margin-top:12px}
+.sfpc-board-key i{display:inline-block; width:12px; height:12px; border-radius:3px; margin:0 4px 0 12px; vertical-align:-2px}
+.sfpc-board-key .first{background:#1D9E75; box-shadow:inset 0 0 0 2px #FAC775} .sfpc-board-key .ok{background:#0F6E56} .sfpc-board-key .bad{background:#712B13} .sfpc-board-key .pend{background:#185FA5}
+@media (max-width:700px){ .sfpc-count{font-size:40px} }
