@@ -97,7 +97,7 @@ foreach ($probs as $i => $p) {
     $bossNo++; [$kind, $name] = sfpc_boss_kind($bossNo);
     $r = $mash[$bossNo] ?? null; $st = $team ? sfpc_boss_state($r) : '';
     $nodes[] = ['t' => 'b', 'n' => $bossNo, 'kind' => $kind, 'name' => $name,
-                'open' => $nSolved >= $bossNo * $every && $passed >= $bossNo - 1,
+                'open' => !$team || ($nSolved >= $bossNo * $every && $passed >= $bossNo - 1),   /* 운영진 미리 보기는 모두 열려 있다 */
                 'needMore' => max(0, $bossNo * $every - $nSolved), 'st' => $st,
                 'cnt' => ($st === 'done' && $r['removed_at'] === '') ? (int)$r['cnt'] : 0, 'href' => 'sfpc_boss.php?b=' . $bossNo];
   }
@@ -106,7 +106,7 @@ foreach ($probs as $i => $p) {
 <div class="sfpc-world">
   <?php if ($state === 'before'): ?><div class="sfpc-world-note">아직 시작 전입니다. <?= h(period_text($set)) ?></div>
   <?php elseif ($state === 'after'): ?><div class="sfpc-world-note">공부하기 기간이 끝났습니다. 문제는 볼 수 있지만 제출할 수 없습니다.</div><?php endif; ?>
-  <?php if (!$team): ?><div class="sfpc-world-note">운영진 미리 보기입니다. 수료와 연타 기록은 팀 계정에만 남습니다.</div><?php endif; ?>
+  <?php if (!$team): ?><div class="sfpc-world-note">운영진 미리 보기입니다. 수료 · 보스와 상관없이 모든 칸에 갈 수 있습니다. 수료와 연타 기록은 팀 계정에만 남습니다.</div><?php endif; ?>
 
   <div class="sfpc-world-hud">
     <div class="who"><b><?= h($team ? $team['team_name'] : '미리 보기') ?></b>
@@ -151,8 +151,8 @@ foreach ($probs as $i => $p) {
   });
 
   /* 관문 — 아직 지나지 않은 첫 보스까지만 갈 수 있다 */
-  var MAX = NODES.length - 1, CALL = -1;
-  for (var q = 0; q < NODES.length; q++) if (NODES[q].t === 'b' && NODES[q].st === '') { MAX = q; if (NODES[q].open) CALL = q; break; }
+  var MAX = NODES.length - 1, CALL = -1, PREVIEW = <?= $team ? 'false' : 'true' ?>;
+  if (!PREVIEW) for (var q = 0; q < NODES.length; q++) if (NODES[q].t === 'b' && NODES[q].st === '') { MAX = q; if (NODES[q].open) CALL = q; break; }
   var cur = -1; try { cur = parseInt(sessionStorage.getItem(KEY) || '-1', 10); } catch (e) {}
   if (!(cur >= 0 && cur <= MAX)) { cur = 0; for (var i = 0; i <= MAX; i++) if (NODES[i].t === 'p' && !NODES[i].ok) { cur = i; break; } }
   if (CALL >= 0) cur = CALL;                                             /* 보스가 기다리고 있으면 그 앞에 세운다 */

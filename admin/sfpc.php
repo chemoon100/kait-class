@@ -14,7 +14,7 @@ require_once __DIR__ . '/../guard.php';
 require_once __DIR__ . '/../layout.php';
 $me = need_admin('../');
 
-const SFPC_TABS = ['summary' => '접수 현황', 'teams' => '팀 목록', 'coaches' => '지도교사', 'study' => '공부하기', 'arena' => '준비 · 대회', 'log' => '변경 기록',
+const SFPC_TABS = ['summary' => '접수 현황', 'teams' => '팀 목록', 'coaches' => '지도교사', 'study' => '공부하기', 'arena' => '준비 · 대회', 'rejudge' => '재채점', 'log' => '변경 기록',
                   'schools' => '학교 목록', 'settings' => '설정'];
 const SFPC_COACH_ID_RE = '/^[A-Za-z][A-Za-z0-9_.-]{3,19}$/';
 $tab = (string)($_GET['tab'] ?? 'summary');
@@ -342,6 +342,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if ($act === 'run_drop') {              /* 판 하나를 없앤다 — 그 팀의 오늘 도전이 하나 돌아온다 */
     db()->prepare("DELETE FROM sfpc_runs WHERE id = ? AND contest = ?")->execute([(int)($_POST['rid'] ?? 0), SFPC_CONTEST]);
     redirect_with('그 판을 없앴습니다.');
+  }
+  /* ── 전체 알림 · 재채점 ── */
+  if ($act === 'live_send') {
+    $text = sfpc_clean((string)($_POST['text'] ?? ''), 160);
+    if (ustrlen($text) < 2) redirect_with('', '알림 내용을 적어 주세요.');
+    db()->prepare("INSERT INTO sfpc_events(contest, kind, text, created_at) VALUES(?,'notice',?,?)")->execute([SFPC_CONTEST, $text, now()]);
+    sfpc_log(null, null, $me, 'admin', '전체 알림: ' . $text);
+    redirect_with('알림을 보냈습니다. 공부하기 · 준비하기 · 도전하기 · 스코어보드를 열어 둔 화면에 ' . SFPC_LIVE_SEC . '초 안에 뜹니다.');
+  }
+  if ($act === 'rj_start') {
+    $sid = (int)($_POST['set'] ?? 0);
+    if (sfpc_set_stage($sid) === '') redirect_with('', '묶음을 고르세요.');
+    $bid = sfpc_rejudge_start($sid, (int)($_POST['problem'] ?? 0), (int)($_POST['team_user'] ?? 0), (string)($_POST['scope'] ?? 'all'), !empty($_POST['auto']), (int)$me['id']);
+    if (!$bid) redirect_with('', '조건에 맞는 제출이 없습니다 (채점 중이거나 이미 다른 재채점 묶음에 든 제출은 빼고 셉니다).');
+    $n = (int)col("SELECT COUNT(*) FROM sfpc_rejudge_item WHERE batch_id = ?", [$bid]);
+    sfpc_log(null, null, $me, 'admin', '재채점 묶음 #' . $bid . ' 시작 (' . $n . '건)');
+    redirect_with('재채점 묶음 #' . $bid . ' — ' . $n . '건을 다시 채점합니다. 끝날 때까지 순위표는 예전 판정 그대로입니다.');
+  }
+  if ($act === 'rj_apply' || $act === 'rj_cancel') {
+    $b = one("SELECT * FROM sfpc_rejudge WHERE id = ? AND contest = ? AND status = 'running'", [(int)($_POST['bid'] ?? 0), SFPC_CONTEST]);
+    if (!$b) redirect_with('', '이미 끝난 묶음입니다.');
+    $info = sfpc_rejudge_info((int)$b['id']);
+    if ($act === 'rj_apply') {
+      if ($info['done'] < $info['total']) redirect_with('', '아직 채점이 끝나지 않았습니다 (' . $info['done'] . ' / ' . $info['total'] . '). 다 끝난 뒤에 적용할 수 있습니다.');
+      sfpc_rejudge_apply((int)$b['id']);
+      sfpc_log(null, null, $me, 'admin', '재채점 묶음 #' . $b['id'] . ' 적용 (판정이 바뀐 제출 ' . $info['changed'] . '건)');
+      redirect_with('적용했습니다. 새 판정이 순위표에 들어갔습니다 (판정이 바뀐 제출 ' . $info['changed'] . '건).');
+    }
+    if (!sfpc_rejudge_cancel((int)$b['id'])) redirect_with('', '채점기에 넘어가 있는 제출이 있습니다. 잠시 뒤에 다시 눌러 주세요.');
+    sfpc_log(null, null, $me, 'admin', '재채점 묶음 #' . $b['id'] . ' 취소');
+    redirect_with('취소했습니다. 모든 제출을 예전 판정으로 되돌렸습니다.');
   }
   if ($act === 'contest_conf') {
     $from = str_replace('T', ' ', trim((string)($_POST['contest_from'] ?? ''))); $to = str_replace('T', ' ', trim((string)($_POST['contest_to'] ?? '')));
@@ -867,6 +898,16 @@ sfpc_css('../');
     <?php endforeach; ?></tbody></table></div></details>
   <?php endif; ?>
 
+  <h2 style="font-size:17px; margin:30px 0 10px">전체 알림 <span class="small muted" style="font-weight:400">· 지금 화면을 보고 있는 팀에게 바로 띄웁니다</span></h2>
+  <form method="post" class="sfpc-rowform" style="gap:8px; flex-wrap:wrap" onsubmit="return confirm('모든 팀 화면에 이 알림을 띄울까요?')">
+    <?= sfpc_csrf_field() ?><input type="hidden" name="act" value="live_send">
+    <input type="text" name="text" maxlength="160" placeholder="예: C번 문제의 입력 설명을 고쳤습니다. 문제를 다시 읽어 주세요." style="flex:1; min-width:280px">
+    <button class="btn primary sm">알림 보내기</button>
+  </form>
+  <p class="small muted" style="margin:6px 0 0">공부하기 · 준비하기 · 도전하기 · 스코어보드와 그 문제 화면에 <?= SFPC_LIVE_SEC ?>초 안에 뜨고, "확인"을 눌러야 사라집니다. 나중에 들어온 사람도 읽어야 하는 내용은 공지사항에도 올려 주세요.
+    <?php $evs = all("SELECT e.*, t.team_name FROM sfpc_events e LEFT JOIN sfpc_teams t ON t.id = e.team_id WHERE e.contest = ? ORDER BY e.id DESC LIMIT 8", [SFPC_CONTEST]); ?>
+    <?php if ($evs): ?><br>최근 알림: <?php foreach ($evs as $e): ?><span class="sfpc-flag" style="margin:2px"><?= h(substr($e['created_at'], 11, 5)) ?> <?= $e['kind'] === 'first' ? '첫 정답 · ' . h($e['team_name'] ?? '') : h($e['text']) ?></span><?php endforeach; ?><?php endif; ?></p>
+
   <h2 style="font-size:17px; margin:30px 0 10px">도전하기 (본 대회) <span class="small muted" style="font-weight:400">· <a href="../sfpc_contest.php" target="_blank" rel="noopener">화면 보기</a> · <a href="../sfpc_board.php?live=1" target="_blank" rel="noopener">스코어보드(실제 순위)</a></span></h2>
   <p class="small" style="margin:0 0 10px">문제 <b><?= count(sfpc_set_problems((int)$cset['id'])) ?></b>개 · <a class="btn sm" href="set.php?id=<?= (int)$cset['id'] ?>">문제 넣기 · 순서 바꾸기</a>
     <?php if (!sfpc_set_problems((int)$cset['id'])): ?><form method="post" style="display:inline"><?= sfpc_csrf_field() ?><input type="hidden" name="set" value="<?= (int)$cset['id'] ?>"><button class="btn sm" name="act" value="arena_fill">공부하기 문제 담기 (시험용)</button></form><?php endif; ?>
@@ -901,6 +942,61 @@ sfpc_css('../');
       h.textContent = '→ ' + (f.getMonth() + 1) + '월 ' + f.getDate() + '일 ' + p(f.getHours()) + ':' + p(f.getMinutes()) + ' 부터 얼립니다. ' + base; }
     to.addEventListener('input', up); m.addEventListener('input', up); up(); })();
   </script>
+
+<?php elseif ($tab === 'rejudge'):
+  sfpc_rejudge_tick();
+  $stages = ['sfpc_contest' => '도전하기', 'sfpc_ready' => '준비하기', 'sfpc_study' => '공부하기'];
+  $rjSets = []; foreach (all("SELECT id, title FROM sets ORDER BY id") as $x) { $stg = sfpc_set_stage((int)$x['id']); if ($stg !== '') $rjSets[(int)$x['id']] = $stages[$stg] . ' — ' . $x['title']; }
+  $selSet = (int)($_GET['set'] ?? sfpc_setting('sfpc_contest_set')); if (!isset($rjSets[$selSet])) $selSet = (int)(array_key_first($rjSets) ?? 0);
+  $q = ['pending' => 0, 'judging' => 0]; foreach (all("SELECT state, COUNT(*) n FROM submissions WHERE state IN ('pending','judging') GROUP BY state") as $x) $q[$x['state']] = (int)$x['n'];
+  $hbFile = DATA_DIR . '/worker.heartbeat'; $hbAge = is_file($hbFile) ? time() - (int)filemtime($hbFile) : null; $alive = $hbAge !== null && $hbAge < 60;
+  $ieN = (int)col("SELECT COUNT(*) FROM submissions WHERE set_id = ? AND (verdict = 'IE' OR state = 'error')", [$selSet]);
+  $batches = all("SELECT * FROM sfpc_rejudge WHERE contest = ? ORDER BY id DESC LIMIT 30", [SFPC_CONTEST]); $anyRun = false; ?>
+  <div class="note <?= $alive ? 'info' : 'err' ?>">채점기: <b><?= $alive ? '정상' : '멈춤' . ($hbAge !== null ? ' (마지막 신호 ' . intdiv($hbAge, 60) . '분 전)' : ' (신호 없음)') ?></b>
+    · 채점을 기다리는 제출 <b><?= $q['pending'] ?></b>건 · 채점 중 <b><?= $q['judging'] ?></b>건
+    <?= $alive ? '' : '· 채점기가 멈춰 있으면 재채점을 걸어도 돌지 않습니다. 먼저 서버를 고쳐 주세요.' ?>
+    <br><span class="small">채점기가 멈춘 동안 낸 제출은 "기다리는 제출"로 남아 있다가, 채점기가 돌아오면 재채점을 걸지 않아도 차례대로 채점됩니다. 재채점은 <b>이미 판정이 난 제출</b>을 다시 돌릴 때 씁니다 (채점 오류 IE, 테스트케이스를 고친 문제).</span></div>
+
+  <h2 style="font-size:17px; margin:20px 0 10px">새 재채점</h2>
+  <form method="get" class="sfpc-rowform" style="gap:8px; margin-bottom:8px"><input type="hidden" name="tab" value="rejudge">
+    <label class="small">어느 묶음 <select name="set" onchange="this.form.submit()"><?php foreach ($rjSets as $id => $t): ?><option value="<?= $id ?>"<?= $id === $selSet ? ' selected' : '' ?>><?= h($t) ?></option><?php endforeach; ?></select></label>
+    <span class="small muted">이 묶음의 채점 오류(IE) <?= $ieN ?>건</span></form>
+  <form method="post" class="sfpc-form" style="max-width:640px" onsubmit="return confirm('재채점을 시작할까요?\n끝날 때까지 순위표는 예전 판정 그대로이고, 끝난 뒤 바뀐 것을 보고 적용하거나 취소할 수 있습니다.')">
+    <?= sfpc_csrf_field() ?><input type="hidden" name="act" value="rj_start"><input type="hidden" name="set" value="<?= $selSet ?>">
+    <div class="row">
+      <div class="field"><label for="rjp">문제</label><select id="rjp" name="problem"><option value="0">모든 문제</option>
+        <?php foreach (sfpc_set_problems($selSet) as $i => $pp): ?><option value="<?= (int)$pp['id'] ?>"><?= sfpc_letter($i) ?> · <?= h($pp['title']) ?></option><?php endforeach; ?></select></div>
+      <div class="field"><label for="rjt">팀</label><select id="rjt" name="team_user"><option value="0">모든 팀</option>
+        <?php foreach (all("SELECT team_name, account_user_id FROM sfpc_teams WHERE contest = ? AND account_user_id > 0 ORDER BY team_name", [SFPC_CONTEST]) as $tt): ?><option value="<?= (int)$tt['account_user_id'] ?>"><?= h($tt['team_name']) ?></option><?php endforeach; ?></select></div>
+    </div>
+    <div class="field"><label>어떤 제출을</label>
+      <div class="sfpc-way" style="flex-direction:column">
+        <?php foreach (SFPC_REJUDGE_SCOPE as $k => $lab): ?><label><input type="radio" name="scope" value="<?= $k ?>"<?= $k === 'all' ? ' checked' : '' ?>><span><b><?= h($lab) ?></b>
+          <small><?= ['all' => '테스트케이스나 제한 시간을 고쳤을 때. 정답이 오답으로 바뀔 수도 있습니다.', 'wrong' => '정답은 그대로 두고, 틀렸던 제출만 다시 봅니다.', 'ie' => '서버가 폭주해 채점 오류가 난 제출만. 보통 "끝나는 대로 적용"과 함께 씁니다.'][$k] ?></small></span></label><?php endforeach; ?>
+      </div></div>
+    <label class="small" style="display:block; margin:6px 0 12px"><input type="checkbox" name="auto" value="1"> <b>끝나는 대로 적용</b> — 바뀐 것을 확인하지 않고 바로 순위표에 넣습니다</label>
+    <div class="btnrow"><button class="btn primary">재채점 시작</button></div>
+  </form>
+
+  <h2 style="font-size:17px; margin:26px 0 10px">재채점 묶음</h2>
+  <?php if (!$batches): ?><div class="empty">아직 재채점한 적이 없습니다.</div><?php endif; ?>
+  <?php foreach ($batches as $b): $info = sfpc_rejudge_info((int)$b['id']); $run = $b['status'] === 'running'; $fin = $info['done'] >= $info['total']; if ($run && !$fin) $anyRun = true; ?>
+    <div class="sfpc-rj <?= $run ? 'running' : '' ?>">
+      <h3>#<?= (int)$b['id'] ?> · <?= h($b['label']) ?>
+        <span class="sfpc-flag"><?= $run ? ($fin ? '채점 끝 — 적용을 기다림' : '채점 중 ' . $info['done'] . ' / ' . $info['total']) : ($b['status'] === 'applied' ? '적용됨' : '취소됨') ?></span></h3>
+      <p class="small muted" style="margin:0"><?= h(substr($b['created_at'], 5, 11)) ?> · <?= $info['total'] ?>건<?= (int)$b['auto_apply'] ? ' · 끝나는 대로 적용' : '' ?> · 판정이 바뀐 제출 <b><?= $info['changed'] ?></b>건</p>
+      <?php if ($b['status'] !== 'canceled' && $info['changes']): ?><div class="sfpc-rj-matrix"><?php foreach ($info['changes'] as $k => $n): [$o, $nw] = explode('>', $k); ?>
+        <span class="<?= $o !== $nw ? 'chg' : '' ?>"><?= h(sfpc_verdict_label($o)) ?><?= $o !== $nw ? ' → ' . h(sfpc_verdict_label($nw)) : ' (그대로)' ?> <?= $n ?>건</span><?php endforeach; ?></div><?php endif; ?>
+      <?php if ($run && $info['rows']): ?><details><summary class="small">판정이 바뀐 제출 보기</summary><div class="tablewrap" style="margin-top:6px"><table class="list">
+        <thead><tr><th>제출</th><th>팀</th><th>문제</th><th>예전</th><th>새</th></tr></thead><tbody>
+        <?php foreach ($info['rows'] as $r): ?><tr><td><a href="../results.php?id=<?= (int)$r['id'] ?>">#<?= (int)$r['id'] ?></a> <span class="small muted"><?= h(substr($r['created_at'], 11, 5)) ?></span></td><td><?= h($r['team_name'] ?? '–') ?></td><td><?= h($r['title']) ?></td><td><?= h(sfpc_verdict_label($r['o'])) ?></td><td><b><?= h(sfpc_verdict_label($r['n'])) ?></b></td></tr><?php endforeach; ?>
+        </tbody></table></div></details><?php endif; ?>
+      <?php if ($run): ?><form method="post" class="btnrow" style="margin-top:8px"><?= sfpc_csrf_field() ?><input type="hidden" name="bid" value="<?= (int)$b['id'] ?>">
+        <button class="btn primary sm" name="act" value="rj_apply" <?= $fin ? '' : 'disabled' ?> onclick="return confirm('새 판정을 순위표에 넣을까요?')">적용 — 새 판정을 순위에 반영</button>
+        <button class="btn sm" name="act" value="rj_cancel" onclick="return confirm('이 재채점을 취소하고 모든 제출을 예전 판정으로 되돌릴까요?')">취소 — 예전 판정으로 되돌리기</button></form><?php endif; ?>
+    </div>
+  <?php endforeach; ?>
+  <?php if ($anyRun): ?><p class="small muted">채점 중인 묶음이 있어 10초마다 새로 고칩니다.</p><script>setTimeout(function () { if (!document.querySelector('details[open]')) location.reload(); }, 10000);</script><?php endif; ?>
 
 <?php elseif ($tab === 'log'):
   /* ── 변경 기록 ── */

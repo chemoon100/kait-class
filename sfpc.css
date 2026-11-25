@@ -528,3 +528,23 @@ table.sfpc-pvlinks td a:hover{text-decoration:none; background:var(--b50)}
 .sfpc-board-key i{display:inline-block; width:12px; height:12px; border-radius:3px; margin:0 4px 0 12px; vertical-align:-2px}
 .sfpc-board-key .first{background:#1D9E75; box-shadow:inset 0 0 0 2px #FAC775} .sfpc-board-key .ok{background:#0F6E56} .sfpc-board-key .bad{background:#712B13} .sfpc-board-key .pend{background:#185FA5}
 @media (max-width:700px){ .sfpc-count{font-size:40px} }
+
+/* 알림 (퍼솔 · 운영진 전체 알림) */
+.sfpc-toasts{position:fixed; top:64px; left:50%; transform:translateX(-50%); z-index:80; display:grid; gap:10px; width:min(520px, calc(100vw - 24px)); pointer-events:none}
+.sfpc-toast{pointer-events:auto; display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:12px; border:2px solid #FAC775; background:#2B1D08; color:#fff;
+  box-shadow:0 10px 30px rgba(0,0,0,.45); animation:sfpcToast .35s ease-out; font-family:Galmuri11, monospace}
+.sfpc-toast.notice{border-color:#85B7EB; background:#0C2440}
+.sfpc-toast canvas{flex:0 0 64px; image-rendering:pixelated; background:#1D1238; border-radius:8px}
+.sfpc-toast .tx{flex:1; min-width:0}
+.sfpc-toast small{display:block; font-size:11px; letter-spacing:1px; color:#FAC775} .sfpc-toast.notice small{color:#85B7EB}
+.sfpc-toast b{display:block; font-size:17px; margin:2px 0; overflow-wrap:anywhere}
+.sfpc-toast span{display:block; font-size:13px; color:#F5E3C2}
+.sfpc-toast button{font:inherit; font-size:12px; background:none; border:1px solid currentColor; color:inherit; border-radius:6px; padding:5px 10px; cursor:pointer; opacity:.85}
+@keyframes sfpcToast{from{transform:translateY(-16px); opacity:0} to{transform:none; opacity:1}}
+@media (prefers-reduced-motion: reduce){ .sfpc-toast{animation:none} }
+.sfpc-rj-matrix{display:flex; gap:6px; flex-wrap:wrap; margin:6px 0}
+.sfpc-rj-matrix span{padding:3px 9px; border-radius:12px; background:#F1EFE8; font-size:12px}
+.sfpc-rj-matrix span.chg{background:#FAEEDA; color:#633806; font-weight:700}
+.sfpc-rj{padding:14px 16px; border:1px solid var(--line); border-radius:10px; margin-bottom:10px; background:#fff}
+.sfpc-rj.running{border-color:#EF9F27}
+.sfpc-rj h3{margin:0 0 4px; font-size:15px}
