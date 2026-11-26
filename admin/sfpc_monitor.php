@@ -120,7 +120,7 @@ sfpc_css('../');
   var prev = null, alarmOn = false, lastBeep = 0, hist = [], live = [];
   var $ = function (id) { return document.getElementById(id); };
   var fmtKB = function (kb) { return kb >= 1048576 ? (kb / 1048576).toFixed(1) + ' GB' : (kb >= 1024 ? (kb / 1024).toFixed(0) + ' MB' : kb + ' KB'); };
-  var fmtBps = function (b) { return b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB/s' : (b >= 1024 ? (b / 1024).toFixed(0) + ' KB/s' : b + ' B/s'); };
+  var fmtBps = function (b) { b = Math.round(b); return b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB/s' : (b >= 1024 ? (b / 1024).toFixed(0) + ' KB/s' : b + ' B/s'); };
   var fmtSec = function (s) { return s >= 3600 ? Math.floor(s / 3600) + '시간 ' + Math.floor(s % 3600 / 60) + '분' : (s >= 60 ? Math.floor(s / 60) + '분 ' + (s % 60) + '초' : s + '초'); };
   var lv = function (v, warn, bad) { return v === null || v === undefined ? 'na' : (v >= bad ? 'bad' : (v >= warn ? 'warn' : 'ok')); };
   var esc = function (s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
