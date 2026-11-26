@@ -24,7 +24,7 @@ if ($u) $kinds[] = "'notice'";
 $out = ['top' => sfpc_event_top(), 'events' => []];
 if ($kinds) {
   $letters = [];
-  foreach (sfpc_set_problems((int)sfpc_setting('sfpc_contest_set')) as $i => $p) $letters[(int)$p['id']] = sfpc_letter($i);
+  foreach (sfpc_set_problems(sfpc_main_set()) as $i => $p) $letters[(int)$p['id']] = sfpc_letter($i);
   foreach (all("SELECT * FROM sfpc_events WHERE contest = ? AND id > ? AND kind IN (" . implode(',', $kinds) . ") AND created_at >= ? ORDER BY id LIMIT 10",
                [SFPC_CONTEST, $after, date('Y-m-d H:i:s', time() - 900)]) as $e) {
     $row = ['id' => (int)$e['id'], 'kind' => $e['kind'], 'text' => $e['text']];

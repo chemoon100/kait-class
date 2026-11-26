@@ -14,6 +14,10 @@ $u = me();
 $team = sfpc_my_team($u);
 $live = is_admin($u) && !empty($_GET['live']);
 
+/* 바깥 스코어보드를 쓰는 동안은 그리로 보낸다 (우리 것은 공개 스위치를 꺼 숨겨 둔다. 운영진은 그대로 볼 수 있다) */
+$ext = sfpc_setting('sfpc_board_url');
+if ($ext !== '' && sfpc_setting('sfpc_board_open') !== '1' && !is_admin($u)) { header('Location: ' . $ext); exit; }
+
 page_head(['title' => '스코어보드', 'root' => '', 'user' => $u, 'nav' => 'sfpc_board']);
 sfpc_css();
 if (!sfpc_gate('sfpc_board_open', '스코어보드', $u)) { page_foot(); exit; }

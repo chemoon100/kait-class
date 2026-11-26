@@ -78,6 +78,28 @@ function sfpc_csv_out(string $file, array $head, array $rows): never {
   exit;
 }
 if (isset($_GET['export'])) {
+  /* 바깥 스코어보드에 미리 넣을 목록 — 팀(ID · 팀명 · 학교 · 참가 구분 · 정식 여부)과 대회별 문제(번호 · 글자 · 제목) */
+  if (in_array($_GET['export'], ['teams', 'teams_csv', 'problems'], true)) {
+    $json = function (string $file, array $data): never {
+      while (ob_get_level() > 0) ob_end_clean();
+      header('Content-Type: application/json; charset=utf-8'); header('Content-Disposition: attachment; filename="' . $file . '"'); header('Cache-Control: no-store');
+      echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT); exit;
+    };
+    if ($_GET['export'] === 'problems') {
+      $r = sfpc_round((int)($_GET['r'] ?? 0)); if (!$r) { http_response_code(404); exit; }
+      $out = []; foreach (sfpc_set_problems((int)$r['set_id']) as $i => $pp) $out[] = ['id' => (string)$pp['id'], 'label' => sfpc_letter($i), 'name' => $pp['title']];
+      $json('sfpc-contest-' . (int)$r['id'] . '-problems.json', ['contest_id' => (string)$r['id'], 'contest_name' => $r['title'], 'start' => $r['from_at'], 'end' => $r['to_at'], 'problems' => $out]);
+    }
+    $rows = all("SELECT * FROM sfpc_teams WHERE contest = ? AND status = 'submitted' ORDER BY id", [SFPC_CONTEST]);
+    if ($_GET['export'] === 'teams') {
+      $json('sfpc-teams-' . date('Ymd-Hi') . '.json', array_map(fn($t) => ['id' => (string)$t['id'], 'name' => $t['team_name'], 'school' => $t['school_name'], 'region' => $t['region'],
+        'category' => SFPC_CATS[$t['category']]['label'] ?? '', 'official' => $t['kind'] === 'student' && $t['track'] === 'participant', 'observer' => $t['kind'] === 'teacher',
+        'account' => (int)$t['account_user_id'] > 0], $rows));
+    }
+    sfpc_csv_out('sfpc-teams-for-scoreboard-' . date('Ymd-Hi') . '.csv', ['팀 ID', '팀명', '학교', '지역', '참가 구분', '정식 여부', '접수번호'],
+      array_map(fn($t) => [$t['id'], $t['team_name'], $t['school_name'], $t['region'], SFPC_CATS[$t['category']]['label'] ?? '',
+        $t['kind'] === 'teacher' ? '옵저버(교사 · 예비교사)' : ($t['track'] === 'participant' ? '정식참가' : '시범참가'), sfpc_team_no($t)], $rows));
+  }
   [, $where, $args] = sfpc_admin_filter();
   $teams = sfpc_admin_teams($where, $args);
   $stamp = date('Ymd-Hi');
@@ -333,7 +355,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   }
   if ($act === 'arena_fill') {            /* 시험용 — 공부하기의 문제를 그대로 담는다 */
     $sid = (int)($_POST['set'] ?? 0);
-    if (sfpc_set_stage($sid) !== 'sfpc_ready' && sfpc_set_stage($sid) !== 'sfpc_contest') redirect_with('', '묶음을 찾지 못했습니다.');
+    if (!in_array(sfpc_set_stage($sid), ['sfpc_ready', 'sfpc_contest', 'sfpc_practice'], true)) redirect_with('', '묶음을 찾지 못했습니다.');
     if (sfpc_set_problems($sid)) redirect_with('', '이미 문제가 담겨 있습니다.');
     $ps = sfpc_study_problems(); if (!$ps) redirect_with('', '공부하기에 문제가 없습니다. 먼저 공부하기 탭에서 연습용 문제를 넣어 주세요.');
     foreach ($ps as $i => $pp) db()->prepare("INSERT INTO set_problems(set_id, problem_id, required_ac, sort) VALUES(?,?,1,?)")->execute([$sid, $pp['id'], $i + 1]);
@@ -374,21 +396,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sfpc_log(null, null, $me, 'admin', '재채점 묶음 #' . $b['id'] . ' 취소');
     redirect_with('취소했습니다. 모든 제출을 예전 판정으로 되돌렸습니다.');
   }
-  if ($act === 'contest_conf') {
-    $from = str_replace('T', ' ', trim((string)($_POST['contest_from'] ?? ''))); $to = str_replace('T', ' ', trim((string)($_POST['contest_to'] ?? '')));
-    $set = sfpc_arena_set('sfpc_contest_set', 'SFPC 도전하기', 'assessment');
+  if ($act === 'round_conf') {
+    $r = sfpc_round((int)($_POST['rid'] ?? 0)); if (!$r) redirect_with('', '대회를 찾지 못했습니다.');
+    $from = str_replace('T', ' ', trim((string)($_POST['from'] ?? ''))); $to = str_replace('T', ' ', trim((string)($_POST['to'] ?? '')));
     if ($from === '' && $to === '') {
-      setting_set('sfpc_contest_from', ''); setting_set('sfpc_contest_to', '');
-      db()->prepare("UPDATE sets SET start_at = NULL, end_at = NULL WHERE id = ?")->execute([$set['id']]);
-      redirect_with('대회 일시를 비웠습니다.');
+      db()->prepare("UPDATE sfpc_rounds SET from_at = '', to_at = '' WHERE id = ?")->execute([$r['id']]);
+      db()->prepare("UPDATE sets SET start_at = NULL, end_at = NULL WHERE id = ?")->execute([$r['set_id']]);
+      redirect_with($r['title'] . '의 일시를 비웠습니다.');
     }
     if (!sfpc_ts($from) || !sfpc_ts($to) || sfpc_ts($to) <= sfpc_ts($from)) redirect_with('', '시작과 끝을 날짜와 시각으로 넣어 주세요. 끝이 시작보다 뒤여야 합니다.');
-    $len = intdiv(sfpc_ts($to) - sfpc_ts($from), 60);
-    $fz = ($_POST['freeze'] ?? 'off') === 'on' ? max(1, min($len, (int)($_POST['freeze_min'] ?? 60))) : 0;
-    setting_set('sfpc_contest_from', substr($from, 0, 16)); setting_set('sfpc_contest_to', substr($to, 0, 16)); setting_set('sfpc_freeze_min', (string)$fz);
+    foreach (sfpc_rounds() as $o) {            /* 대회끼리 시간이 겹치면 안 된다 — 한 팀이 두 대회를 동시에 치를 수 없다 */
+      $ot = sfpc_round_time($o);
+      if ((int)$o['id'] !== (int)$r['id'] && $ot['state'] !== 'unset' && sfpc_ts($from) < $ot['to'] && sfpc_ts($to) > $ot['from']) redirect_with('', '"' . $o['title'] . '"와 시간이 겹칩니다.');
+    }
+    db()->prepare("UPDATE sfpc_rounds SET from_at = ?, to_at = ? WHERE id = ?")->execute([substr($from, 0, 16), substr($to, 0, 16), $r['id']]);
     /* 묶음의 기간도 맞춘다 — 대회 시간 밖의 제출은 채점 서버가 받지 않는다 */
-    db()->prepare("UPDATE sets SET start_at = ?, end_at = ? WHERE id = ?")->execute([substr($from, 0, 16), date('Y-m-d H:i', sfpc_ts($to) - 60), $set['id']]);
-    redirect_with('대회 일시를 저장했습니다. ' . ($fz ? '끝나기 ' . $fz . '분 전(' . date('H:i', sfpc_ts($to) - $fz * 60) . ')부터 스코어보드가 업니다.' : '스코어보드는 얼리지 않습니다.'));
+    db()->prepare("UPDATE sets SET start_at = ?, end_at = ? WHERE id = ?")->execute([substr($from, 0, 16), date('Y-m-d H:i', sfpc_ts($to) - 60), $r['set_id']]);
+    sfpc_log(null, null, $me, 'admin', $r['title'] . ' 일시: ' . substr($from, 0, 16) . ' ~ ' . substr($to, 0, 16));
+    redirect_with($r['title'] . '의 일시를 저장했습니다 (' . intdiv(sfpc_ts($to) - sfpc_ts($from), 60) . '분).');
+  }
+  if ($act === 'feed_key_new') {
+    $key = bin2hex(random_bytes(24));
+    setting_set('sfpc_feed_key', hash('sha256', $key));
+    $_SESSION['sfpc_feed_key_once'] = $key;
+    sfpc_log(null, null, $me, 'admin', '스코어보드 연동 비밀 글자열을 새로 만듦');
+    redirect_with('비밀 글자열을 새로 만들었습니다. 아래에 한 번만 보입니다.');
+  }
+  if ($act === 'feed_conf') {
+    $url = trim((string)($_POST['board_url'] ?? ''));
+    if ($url !== '' && !preg_match('#^https?://[^\s"\'<>]+$#i', $url)) redirect_with('', '스코어보드 주소는 http:// 나 https:// 로 시작해야 합니다.');
+    setting_set('sfpc_board_url', substr($url, 0, 200));
+    foreach (['practice_open', 'board_open', 'first_solve'] as $k) setting_set('sfpc_' . $k, !empty($_POST[$k]) ? '1' : '0');
+    redirect_with('저장했습니다.');
+  }
+  if ($act === 'board_conf') {
+    $m = sfpc_main_round(); $fz = ($_POST['freeze'] ?? 'off') === 'on' ? max(1, min(600, (int)($_POST['freeze_min'] ?? 60))) : 0;
+    if ($m) db()->prepare("UPDATE sfpc_rounds SET freeze_min = ? WHERE id = ?")->execute([$fz, $m['id']]);
+    redirect_with($fz ? '끝나기 ' . $fz . '분 전부터 얼립니다.' : '얼리지 않습니다.');
   }
   if ($act === 'board_final') {
     $on = sfpc_setting('sfpc_board_final') === '1';
@@ -861,13 +905,66 @@ sfpc_css('../');
   <?php endif; ?>
 
 <?php elseif ($tab === 'arena'):
-  $rsets = sfpc_ready_sets(); $cset = sfpc_arena_set('sfpc_contest_set', 'SFPC 도전하기', 'assessment'); $ct = sfpc_contest_time();
-  $dtv = fn(string $k) => str_replace(' ', 'T', sfpc_setting($k)); $fzm = (int)sfpc_setting('sfpc_freeze_min'); $final = sfpc_setting('sfpc_board_final') === '1';
-  $sw = fn(string $k) => sfpc_setting($k) === '1' ? '<b style="color:#0F6E56">공개</b>' : '<b>준비 중</b>'; ?>
+  $rsets = sfpc_ready_sets(); $rounds = sfpc_rounds(); $mainR = sfpc_main_round(); $ct = sfpc_contest_time();
+  $fzm = (int)($mainR['freeze_min'] ?? 0); $final = sfpc_setting('sfpc_board_final') === '1';
+  $sw = fn(string $k) => sfpc_setting($k) === '1' ? '<b style="color:#0F6E56">공개</b>' : '<b>준비 중</b>';
+  $base = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'sfpc.kr');
+  $newKey = $_SESSION['sfpc_feed_key_once'] ?? ''; unset($_SESSION['sfpc_feed_key_once']); ?>
   <div class="note info">문제와 채점은 기존 "수업 · 평가" 묶음을 그대로 씁니다. 문제는 <b>잠근 채</b>(문제 모음에 안 보이게) 만들어 묶음에 담아 주세요.
-    화면 공개는 설정 탭입니다 — 준비하기 <?= $sw('sfpc_ready_open') ?> · 도전하기 <?= $sw('sfpc_contest_open') ?> · 스코어보드 <?= $sw('sfpc_board_open') ?></div>
+    화면 공개: 준비하기 <?= $sw('sfpc_ready_open') ?> · 도전하기 <?= $sw('sfpc_contest_open') ?> (설정 탭) · 연습 <?= $sw('sfpc_practice_open') ?> (아래 "스코어보드 연동")</div>
 
-  <h2 style="font-size:17px; margin:22px 0 10px">준비하기 <span class="small muted" style="font-weight:400">· 모의 대회 · <a href="../sfpc_ready.php" target="_blank" rel="noopener">화면 보기</a></span></h2>
+  <h2 style="font-size:17px; margin:22px 0 6px">대회 <span class="small muted" style="font-weight:400">· 준비하기 네 번과 도전하기 한 번. 모든 팀이 같은 시각에 시작해 같은 시각에 끝납니다</span></h2>
+  <p class="small muted" style="margin:0 0 10px">일시를 넣은 대회만 열립니다. 그 시간 밖에는 문제가 열리지 않고 제출도 받지 않습니다. 종료 전에 들어온 제출은 끝난 뒤에도 끝까지 채점합니다. "대회 ID"는 스코어보드 쪽에 알려 주는 번호입니다.</p>
+  <?php foreach ($rounds as $rr): $tt = sfpc_round_time($rr); $np = count(sfpc_set_problems((int)$rr['set_id']));
+    [$fw, $fa] = sfpc_feed_scope($rr); $ns = $tt['state'] === 'unset' ? 0 : (int)col("SELECT COUNT(*) FROM submissions s $fw", $fa); ?>
+    <form method="post" class="sfpc-rj <?= $tt['state'] === 'open' ? 'running' : '' ?>" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap">
+      <?= sfpc_csrf_field() ?><input type="hidden" name="rid" value="<?= (int)$rr['id'] ?>"><input type="hidden" name="set" value="<?= (int)$rr['set_id'] ?>">
+      <div style="min-width:150px"><span class="sfpc-flag">대회 ID <?= (int)$rr['id'] ?></span>
+        <h3 style="margin:4px 0 2px"><?= h($rr['title']) ?></h3>
+        <span class="small muted"><?= ['unset' => '일시 미정', 'before' => '시작 전', 'open' => '진행 중', 'after' => '끝남'][$tt['state']] ?> · 문제 <?= $np ?>개 · 제출 <?= $ns ?>건</span></div>
+      <div class="field" style="margin:0"><label class="small">시작</label><input type="datetime-local" name="from" value="<?= h(str_replace(' ', 'T', $rr['from_at'])) ?>"></div>
+      <div class="field" style="margin:0"><label class="small">끝</label><input type="datetime-local" name="to" value="<?= h(str_replace(' ', 'T', $rr['to_at'])) ?>"></div>
+      <div class="btnrow" style="margin:0"><button class="btn primary sm" name="act" value="round_conf">일시 저장</button>
+        <a class="btn sm" href="set.php?id=<?= (int)$rr['set_id'] ?>">문제 넣기</a>
+        <?php if (!$np): ?><button class="btn sm" name="act" value="arena_fill">공부하기 문제 담기 (시험용)</button><?php endif; ?>
+        <a class="btn sm" href="?tab=arena&amp;export=problems&amp;r=<?= (int)$rr['id'] ?>">문제 목록</a>
+        <a class="btn sm" href="../<?= $rr['kind'] === 'main' ? 'sfpc_contest.php' : 'sfpc_ready.php?r=' . (int)$rr['id'] ?>" target="_blank" rel="noopener">화면</a></div>
+    </form>
+  <?php endforeach; ?>
+
+  <h2 style="font-size:17px; margin:30px 0 6px">스코어보드 연동 <span class="small muted" style="font-weight:400">· 바깥 스코어보드 서버가 제출 · 채점 기록을 받아 갑니다</span></h2>
+  <?php if ($newKey !== ''): ?><div class="note ok"><b>새 비밀 글자열 — 지금 한 번만 보입니다. 복사해서 스코어보드 담당자에게 안전하게 전해 주세요.</b><br>
+    <code style="font-size:15px; user-select:all; word-break:break-all"><?= h($newKey) ?></code><br><span class="small">서버에는 이 글자열의 지문만 남기므로 다시 볼 수 없습니다. 잃어버리면 새로 만들면 됩니다 (옛 글자열은 그 순간부터 쓸 수 없습니다).</span></div><?php endif; ?>
+  <div class="tablewrap"><table class="list"><tbody>
+    <tr><th style="width:150px">받아 가는 주소</th><td><code><?= h($base) ?>/sfpc_feed.php/contests/<b>대회 ID</b>/submissions?after=<b>번호</b></code><br><code><?= h($base) ?>/sfpc_feed.php/contests/<b>대회 ID</b>/judgements?after=<b>번호</b></code>
+      <br><span class="small muted">after 를 빼면 전체를 내줍니다. 요청 머리말에 <code>Authorization: Bearer (비밀 글자열)</code> 이 있어야 합니다.<?= $base[4] !== 's' ? ' <b>지금 이 서버는 https 가 아닙니다 — 실제 연결은 https 가 붙은 서버에서 해 주세요.</b>' : '' ?></span></td></tr>
+    <tr><th>비밀 글자열</th><td><?= sfpc_setting('sfpc_feed_key') !== '' ? '<b>정해져 있음</b>' : '<b style="color:#A32D2D">아직 없음 — 없으면 아무도 받아 갈 수 없습니다</b>' ?>
+      <form method="post" style="display:inline; margin-left:10px"><?= sfpc_csrf_field() ?><button class="btn sm" name="act" value="feed_key_new" onclick="return confirm('비밀 글자열을 새로 만들까요?<?= sfpc_setting('sfpc_feed_key') !== '' ? '\n지금 쓰는 글자열은 바로 못 쓰게 됩니다.' : '' ?>')">새로 만들기</button></form></td></tr>
+    <tr><th>미리 넣을 목록</th><td><a class="btn sm" href="?tab=arena&amp;export=teams">팀 목록 (JSON)</a> <a class="btn sm" href="?tab=arena&amp;export=teams_csv">팀 목록 (엑셀용 CSV)</a>
+      <span class="small muted">팀 ID · 팀명 · 학교 · 참가 구분 · 정식 여부. 제출 기록의 team_id 가 이 목록의 ID 입니다. 문제 목록은 위의 대회마다 있습니다.</span></td></tr>
+  </tbody></table></div>
+  <form method="post" class="sfpc-form" style="max-width:720px; margin-top:12px">
+    <?= sfpc_csrf_field() ?><input type="hidden" name="act" value="feed_conf">
+    <div class="field"><label for="burl">바깥 스코어보드 주소 <span class="hint" style="display:inline">있으면 "스코어보드"를 누른 사람을 그리로 보냅니다</span></label>
+      <input type="url" id="burl" name="board_url" maxlength="200" placeholder="https://" style="width:100%; max-width:520px" value="<?= h(sfpc_setting('sfpc_board_url')) ?>"></div>
+    <label class="small" style="display:block; margin:4px 0"><input type="checkbox" name="practice_open" value="1"<?= sfpc_setting('sfpc_practice_open') === '1' ? ' checked' : '' ?>> <b>연습 공개</b> — 아무 때나 시작하는 모의 대회 (준비하기가 끝난 뒤에 켭니다)</label>
+    <label class="small" style="display:block; margin:4px 0"><input type="checkbox" name="board_open" value="1"<?= sfpc_setting('sfpc_board_open') === '1' ? ' checked' : '' ?>> 우리가 만든 스코어보드 공개 <span class="muted">(숨겨 둔 예비용 — 바깥 스코어보드를 쓰는 동안은 꺼 둡니다)</span></label>
+    <label class="small" style="display:block; margin:4px 0 12px"><input type="checkbox" name="first_solve" value="1"<?= sfpc_setting('sfpc_first_solve') === '1' ? ' checked' : '' ?>> 우리 화면의 퍼솔 알림 <span class="muted">(숨겨 둔 예비용)</span></label>
+    <div class="btnrow"><button class="btn primary">저장</button></div>
+  </form>
+
+  <h2 style="font-size:17px; margin:30px 0 10px">전체 알림 <span class="small muted" style="font-weight:400">· 지금 화면을 보고 있는 팀에게 바로 띄웁니다</span></h2>
+  <form method="post" class="sfpc-rowform" style="gap:8px; flex-wrap:wrap" onsubmit="return confirm('모든 팀 화면에 이 알림을 띄울까요?')">
+    <?= sfpc_csrf_field() ?><input type="hidden" name="act" value="live_send">
+    <input type="text" name="text" maxlength="160" placeholder="예: C번 문제의 입력 설명을 고쳤습니다. 문제를 다시 읽어 주세요." style="flex:1; min-width:280px">
+    <button class="btn primary sm">알림 보내기</button>
+  </form>
+  <p class="small muted" style="margin:6px 0 0">공부하기 · 준비하기 · 도전하기 · 스코어보드와 그 문제 화면에 <?= SFPC_LIVE_SEC ?>초 안에 뜨고, "확인"을 눌러야 사라집니다. 나중에 들어온 사람도 읽어야 하는 내용은 공지사항에도 올려 주세요.
+    <?php $evs = all("SELECT e.*, t.team_name FROM sfpc_events e LEFT JOIN sfpc_teams t ON t.id = e.team_id WHERE e.contest = ? ORDER BY e.id DESC LIMIT 8", [SFPC_CONTEST]); ?>
+    <?php if ($evs): ?><br>최근 알림: <?php foreach ($evs as $e): ?><span class="sfpc-flag" style="margin:2px"><?= h(substr($e['created_at'], 11, 5)) ?> <?= $e['kind'] === 'first' ? '첫 정답 · ' . h($e['team_name'] ?? '') : h($e['text']) ?></span><?php endforeach; ?><?php endif; ?></p>
+
+  <h2 style="font-size:17px; margin:34px 0 10px">연습 <span class="small muted" style="font-weight:400">· 팀이 아무 때나 시작하는 모의 대회 · 스코어보드에 나가지 않음 · <a href="../sfpc_practice.php" target="_blank" rel="noopener">화면 보기</a></span></h2>
+  <p class="small muted" style="margin:0 0 10px">준비하기 네 번이 끝난 뒤에 "연습 공개"를 켜서 열어 둡니다. 준비하기에 썼던 문제를 세트로 담아 두면 됩니다.</p>
   <form method="post" class="sfpc-rowform" style="gap:10px; flex-wrap:wrap">
     <?= sfpc_csrf_field() ?><input type="hidden" name="act" value="ready_conf">
     <label class="small">한 판 <input type="number" name="ready_min" min="10" max="300" value="<?= sfpc_ready_min() ?>" style="width:76px"> 분</label>
@@ -882,7 +979,7 @@ sfpc_css('../');
         <td><a class="btn sm" href="set.php?id=<?= (int)$sid ?>">문제 넣기 · 이름 바꾸기</a>
           <form method="post" style="display:inline"><?= sfpc_csrf_field() ?><input type="hidden" name="set" value="<?= (int)$sid ?>">
             <?php if (!$np): ?><button class="btn sm" name="act" value="arena_fill">공부하기 문제 담기 (시험용)</button><?php endif; ?>
-            <?php if (count($rsets) > 1): ?><button class="btn sm" name="act" value="ready_drop" onclick="return confirm('이 세트를 준비하기에서 뺄까요? 묶음과 기록은 남습니다.')">빼기</button><?php endif; ?></form></td></tr>
+            <?php if (count($rsets) > 1): ?><button class="btn sm" name="act" value="ready_drop" onclick="return confirm('이 세트를 연습에서 뺄까요? 묶음과 기록은 남습니다.')">빼기</button><?php endif; ?></form></td></tr>
     <?php endforeach; ?></tbody></table></div>
   <form method="post" class="sfpc-rowform" style="margin-top:10px; gap:8px"><?= sfpc_csrf_field() ?><input type="hidden" name="act" value="ready_add">
     <input type="text" name="title" maxlength="40" placeholder="새 세트 이름 (예: 2025 기출)" style="max-width:260px"><button class="btn sm">세트 추가</button></form>
@@ -898,56 +995,28 @@ sfpc_css('../');
     <?php endforeach; ?></tbody></table></div></details>
   <?php endif; ?>
 
-  <h2 style="font-size:17px; margin:30px 0 10px">전체 알림 <span class="small muted" style="font-weight:400">· 지금 화면을 보고 있는 팀에게 바로 띄웁니다</span></h2>
-  <form method="post" class="sfpc-rowform" style="gap:8px; flex-wrap:wrap" onsubmit="return confirm('모든 팀 화면에 이 알림을 띄울까요?')">
-    <?= sfpc_csrf_field() ?><input type="hidden" name="act" value="live_send">
-    <input type="text" name="text" maxlength="160" placeholder="예: C번 문제의 입력 설명을 고쳤습니다. 문제를 다시 읽어 주세요." style="flex:1; min-width:280px">
-    <button class="btn primary sm">알림 보내기</button>
-  </form>
-  <p class="small muted" style="margin:6px 0 0">공부하기 · 준비하기 · 도전하기 · 스코어보드와 그 문제 화면에 <?= SFPC_LIVE_SEC ?>초 안에 뜨고, "확인"을 눌러야 사라집니다. 나중에 들어온 사람도 읽어야 하는 내용은 공지사항에도 올려 주세요.
-    <?php $evs = all("SELECT e.*, t.team_name FROM sfpc_events e LEFT JOIN sfpc_teams t ON t.id = e.team_id WHERE e.contest = ? ORDER BY e.id DESC LIMIT 8", [SFPC_CONTEST]); ?>
-    <?php if ($evs): ?><br>최근 알림: <?php foreach ($evs as $e): ?><span class="sfpc-flag" style="margin:2px"><?= h(substr($e['created_at'], 11, 5)) ?> <?= $e['kind'] === 'first' ? '첫 정답 · ' . h($e['team_name'] ?? '') : h($e['text']) ?></span><?php endforeach; ?><?php endif; ?></p>
 
-  <h2 style="font-size:17px; margin:30px 0 10px">도전하기 (본 대회) <span class="small muted" style="font-weight:400">· <a href="../sfpc_contest.php" target="_blank" rel="noopener">화면 보기</a> · <a href="../sfpc_board.php?live=1" target="_blank" rel="noopener">스코어보드(실제 순위)</a></span></h2>
-  <p class="small" style="margin:0 0 10px">문제 <b><?= count(sfpc_set_problems((int)$cset['id'])) ?></b>개 · <a class="btn sm" href="set.php?id=<?= (int)$cset['id'] ?>">문제 넣기 · 순서 바꾸기</a>
-    <?php if (!sfpc_set_problems((int)$cset['id'])): ?><form method="post" style="display:inline"><?= sfpc_csrf_field() ?><input type="hidden" name="set" value="<?= (int)$cset['id'] ?>"><button class="btn sm" name="act" value="arena_fill">공부하기 문제 담기 (시험용)</button></form><?php endif; ?>
-    · 상태: <b><?= ['unset' => '일시 미정', 'before' => '시작 전', 'open' => '진행 중', 'after' => '끝남'][$ct['state']] ?></b></p>
-  <form method="post" class="sfpc-form" style="max-width:640px">
-    <?= sfpc_csrf_field() ?><input type="hidden" name="act" value="contest_conf">
-    <fieldset><legend>대회 일시</legend>
-      <div class="row">
-        <div class="field"><label for="cf">시작</label><input type="datetime-local" id="cf" name="contest_from" value="<?= h($dtv('sfpc_contest_from')) ?>"></div>
-        <div class="field"><label for="cto">끝</label><input type="datetime-local" id="cto" name="contest_to" value="<?= h($dtv('sfpc_contest_to')) ?>"></div>
-      </div>
-      <span class="hint">모든 팀이 이 시각에 시작해 이 시각에 끝납니다. 이 시간 밖에는 문제가 열리지 않고 제출도 받지 않습니다. 둘 다 비우면 "일시 미정"입니다.</span>
-    </fieldset>
+  <details style="margin-top:34px"><summary><b>우리가 만든 스코어보드</b> <span class="small muted">— 숨겨 둔 예비용. 도전하기의 순위 · 얼리기 · 최종 결과 공개 · <a href="../sfpc_board.php?live=1" target="_blank" rel="noopener">실제 순위 보기</a></span></summary>
+  <form method="post" class="sfpc-form" style="max-width:640px; margin-top:12px">
+    <?= sfpc_csrf_field() ?><input type="hidden" name="act" value="board_conf">
     <fieldset><legend>스코어보드 얼리기 (프리즈)</legend>
       <div class="sfpc-way" style="flex-direction:column">
-        <label><input type="radio" name="freeze" value="off"<?= $fzm ? '' : ' checked' ?>><span><b>얼리지 않음</b><small>끝날 때까지 모든 결과가 그대로 보입니다.</small></span></label>
-        <label><input type="radio" name="freeze" value="on"<?= $fzm ? ' checked' : '' ?>><span><b>끝나기 <input type="number" name="freeze_min" id="fzMin" min="1" max="600" value="<?= $fzm ?: 60 ?>" style="width:74px; display:inline-block"> 분 전부터 얼림</b>
-          <small id="fzHint">그때부터의 제출은 스코어보드에 "?"로만 보입니다. 각 팀은 자기 결과를 계속 봅니다. 대회가 끝나도 얼어 있다가, 아래 "최종 결과 공개"를 누르면 풀립니다.</small></span></label>
-      </div>
-    </fieldset>
-    <div class="btnrow"><button class="btn primary">저장</button></div>
+        <label><input type="radio" name="freeze" value="off"<?= $fzm ? '' : ' checked' ?>><span><b>얼리지 않음</b></span></label>
+        <label><input type="radio" name="freeze" value="on"<?= $fzm ? ' checked' : '' ?>><span><b>끝나기 <input type="number" name="freeze_min" min="1" max="600" value="<?= $fzm ?: 60 ?>" style="width:74px; display:inline-block"> 분 전부터 얼림</b>
+          <small>그때부터의 제출은 "?"로만 보입니다. 대회가 끝나도 얼어 있다가 "최종 결과 공개"를 누르면 풀립니다.</small></span></label>
+      </div></fieldset>
+    <div class="btnrow"><button class="btn sm">저장</button></div>
   </form>
-  <div class="note<?= $final ? ' ok' : '' ?>" style="margin-top:14px; display:flex; gap:14px; align-items:center; flex-wrap:wrap">
-    <span style="flex:1; min-width:240px"><b>지금 스코어보드: <?= $final ? '최종 결과 공개됨' : (sfpc_board_frozen() ? '얼어 있음 (❄ ' . date('H:i', $ct['freeze']) . ' 부터)' : ($ct['freeze'] ? '아직 얼기 전 — ' . date('n월 j일 H:i', $ct['freeze']) . ' 에 업니다' : '얼리지 않음')) ?></b><br>
-      <span class="small">시상식에서 결과를 발표한 뒤 "최종 결과 공개"를 누르면 가려졌던 제출이 모두 드러납니다.</span></span>
-    <form method="post"><?= sfpc_csrf_field() ?><button class="btn <?= $final ? '' : 'primary' ?>" name="act" value="board_final" onclick="return confirm('<?= $final ? '스코어보드를 다시 얼릴까요?' : '최종 결과를 공개할까요? 가려졌던 제출이 모두에게 보입니다.' ?>')"><?= $final ? '다시 얼리기' : '최종 결과 공개' ?></button></form>
-  </div>
-  <script>
-  (function () { var to = document.getElementById('cto'), m = document.getElementById('fzMin'), h = document.getElementById('fzHint'), base = h.textContent;
-    function up() { var t = new Date(to.value), n = parseInt(m.value, 10); if (isNaN(t) || !(n > 0)) { h.textContent = base; return; }
-      var f = new Date(t - n * 60000), p = function (x) { return (x < 10 ? '0' : '') + x; };
-      h.textContent = '→ ' + (f.getMonth() + 1) + '월 ' + f.getDate() + '일 ' + p(f.getHours()) + ':' + p(f.getMinutes()) + ' 부터 얼립니다. ' + base; }
-    to.addEventListener('input', up); m.addEventListener('input', up); up(); })();
-  </script>
+  <div class="note<?= $final ? ' ok' : '' ?>" style="margin-top:10px; display:flex; gap:14px; align-items:center; flex-wrap:wrap">
+    <span style="flex:1; min-width:240px"><b>지금: <?= $final ? '최종 결과 공개됨' : (sfpc_board_frozen() ? '얼어 있음 (❄ ' . date('H:i', $ct['freeze']) . ' 부터)' : ($ct['freeze'] ? '아직 얼기 전 — ' . date('n월 j일 H:i', $ct['freeze']) . ' 에 업니다' : '얼리지 않음')) ?></b></span>
+    <form method="post"><?= sfpc_csrf_field() ?><button class="btn sm" name="act" value="board_final" onclick="return confirm('<?= $final ? '스코어보드를 다시 얼릴까요?' : '최종 결과를 공개할까요?' ?>')"><?= $final ? '다시 얼리기' : '최종 결과 공개' ?></button></form>
+  </div></details>
 
 <?php elseif ($tab === 'rejudge'):
   sfpc_rejudge_tick();
-  $stages = ['sfpc_contest' => '도전하기', 'sfpc_ready' => '준비하기', 'sfpc_study' => '공부하기'];
+  $stages = SFPC_STAGE_NAME;
   $rjSets = []; foreach (all("SELECT id, title FROM sets ORDER BY id") as $x) { $stg = sfpc_set_stage((int)$x['id']); if ($stg !== '') $rjSets[(int)$x['id']] = $stages[$stg] . ' — ' . $x['title']; }
-  $selSet = (int)($_GET['set'] ?? sfpc_setting('sfpc_contest_set')); if (!isset($rjSets[$selSet])) $selSet = (int)(array_key_first($rjSets) ?? 0);
+  $selSet = (int)($_GET['set'] ?? sfpc_main_set()); if (!isset($rjSets[$selSet])) $selSet = (int)(array_key_first($rjSets) ?? 0);
   $q = ['pending' => 0, 'judging' => 0]; foreach (all("SELECT state, COUNT(*) n FROM submissions WHERE state IN ('pending','judging') GROUP BY state") as $x) $q[$x['state']] = (int)$x['n'];
   $hbFile = DATA_DIR . '/worker.heartbeat'; $hbAge = is_file($hbFile) ? time() - (int)filemtime($hbFile) : null; $alive = $hbAge !== null && $hbAge < 60;
   $ieN = (int)col("SELECT COUNT(*) FROM submissions WHERE set_id = ? AND (verdict = 'IE' OR state = 'error')", [$selSet]);

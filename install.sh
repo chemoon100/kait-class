@@ -606,6 +606,12 @@ nginx_body() {
         try_files \$uri \$uri/ =404;
     }
 
+    # SFPC — 바깥 스코어보드가 자료를 받아 가는 주소 (/sfpc_feed.php/contests/4/submissions?after=…)
+    location ~ ^/sfpc_feed\.php/ {
+        rewrite ^/sfpc_feed\.php/contests/([0-9]+)/(submissions|judgements)/?\$ /sfpc_feed.php?contest=\$1&list=\$2 last;
+        return 404;
+    }
+
     location ~ \.php\$ {
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:/run/php/php${PHP_VER}-fpm.sock;
