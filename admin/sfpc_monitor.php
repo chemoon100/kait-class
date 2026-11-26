@@ -47,6 +47,23 @@ if (isset($_GET['json']) || isset($_GET['hist'])) {
 $raw = json_decode(setting('judge_servers'), true); $saved = is_array($raw) ? $raw : [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if (!sfpc_csrf_ok()) redirect_with('', '화면을 연 지 오래되었습니다. 다시 저장해 주세요.');
+  /* 인증 글자열 가져오기 — 채점 서버에서 `sfpc-judge-install.sh --share-token` 을 실행해 두면
+     그 서버가 3분 동안, 본서버에게만, 한 번만 글자열을 내준다. 사람이 옮겨 적지 않아도 된다. */
+  if (isset($_POST['pull'])) {
+    $pu = rtrim(trim((string)$_POST['pull']), '/'); $hit = -1;
+    foreach ($saved as $i => $s) if (rtrim((string)($s['url'] ?? ''), '/') === $pu) $hit = $i;
+    $host = $hit >= 0 ? (string)parse_url($pu, PHP_URL_HOST) : '';
+    if ($host === '') redirect_with('', '먼저 그 서버의 주소를 저장해 주세요.');
+    $ch = curl_init('http://' . $host . ':2359/t');
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 6, CURLOPT_CONNECTTIMEOUT => 4, CURLOPT_FOLLOWLOCATION => false]);
+    $got = trim((string)curl_exec($ch)); $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
+    if ($code !== 200 || !preg_match('/^[A-Za-z0-9_-]{16,128}$/', $got))
+      redirect_with('', '가져오지 못했습니다. 채점 서버에서 bash sfpc-judge-install.sh --share-token 을 실행한 뒤 3분 안에 눌러 주세요.');
+    $saved[$hit]['token'] = $got;
+    setting_set('judge_servers', json_encode(array_values($saved), JSON_UNESCAPED_UNICODE));
+    sfpc_log(null, null, $me, 'admin', '채점 서버 인증 글자열을 가져옴 (' . ($saved[$hit]['name'] ?? $pu) . ')');
+    redirect_with('인증 글자열을 가져와 저장했습니다 (' . ($saved[$hit]['name'] ?? $pu) . '). 채점 일꾼이 곧 다시 연결합니다.');
+  }
   $old = []; foreach ($saved as $s) $old[rtrim((string)($s['url'] ?? ''), '/')] = (string)($s['token'] ?? '');
   $list = [];
   foreach ((array)($_POST['url'] ?? []) as $i => $u) {
@@ -98,7 +115,8 @@ sfpc_css('../');
         <tr><td><input type="text" name="name[<?= $i ?>]" maxlength="30" value="<?= h($s['name'] ?? '') ?>" placeholder="예: 채점 1" style="width:120px"></td>
           <td><input type="text" name="url[<?= $i ?>]" maxlength="200" value="<?= h($s['url'] ?? '') ?>" placeholder="http://10.0.0.5:2358" style="width:230px"></td>
           <td><input type="password" name="token[<?= $i ?>]" autocomplete="new-password" placeholder="<?= $has ? '정해져 있음 — 바꿀 때만 입력' : '없으면 빈칸' ?>" style="width:190px">
-            <?php if ($has): ?><label class="small"><input type="checkbox" name="token_clear[<?= $i ?>]" value="1"> 지우기</label><?php endif; ?></td>
+            <?php if ($has): ?><label class="small"><input type="checkbox" name="token_clear[<?= $i ?>]" value="1"> 지우기</label><?php endif; ?>
+            <?php if (($s['url'] ?? '') !== ''): ?><button class="btn small" name="pull" value="<?= h($s['url']) ?>" title="채점 서버에서 --share-token 을 실행한 뒤 누릅니다">가져오기</button><?php endif; ?></td>
           <td class="num"><input type="number" name="slots[<?= $i ?>]" min="1" max="200" value="<?= (int)($s['slots'] ?? 6) ?>" style="width:70px"></td>
           <td><input type="checkbox" name="reserve[<?= $i ?>]" value="1"<?= !empty($s['reserve']) ? ' checked' : '' ?>></td>
           <td><input type="checkbox" name="on[<?= $i ?>]" value="1"<?= !isset($s['on']) || !empty($s['on']) ? ' checked' : '' ?>></td></tr>
@@ -106,6 +124,7 @@ sfpc_css('../');
     <div class="btnrow" style="margin-top:10px"><button class="btn primary">저장</button></div>
     <ul class="small muted" style="margin:10px 0 0; padding-left:18px; line-height:1.8">
       <li>한 줄도 적지 않으면 예전처럼 서버 설정 파일(config.php)의 <code>judge0_url</code> 한 대만 씁니다. 지금 값: <code><?= h(JUDGE0_URL) ?></code></li>
+      <li>인증 글자열을 옮겨 적지 않으려면: 채점 서버에서 <code>bash sfpc-judge-install.sh --share-token</code> 을 실행하고 3분 안에 그 줄의 "가져오기"를 누릅니다. 채점 서버가 본서버에게만, 한 번만 내줍니다.</li>
       <li>주소 칸을 비우고 저장하면 그 줄은 지워집니다. 인증 글자열은 저장한 뒤에는 화면에 다시 보이지 않습니다.</li>
       <li>"동시에 맡길 수"는 그 서버에 한꺼번에 맡겨 두는 제출 수입니다. 테스트케이스가 10개인 문제면 6 × 10 = 60건이 그 서버 안에 있게 됩니다. 서버의 일꾼 수에 맞춰 정합니다.</li>
       <li>서버가 세 번 연달아 응답하지 않으면 죽은 것으로 보고, 맡겼던 제출을 살아 있는 서버로 다시 보냅니다. 죽은 서버는 10초마다 다시 찔러 봅니다.</li>

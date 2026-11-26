@@ -15,6 +15,8 @@
 #  ● 인증 글자열은 설치할 때 무작위로 만들어 /root/sfpc-judge-token.txt 에 둔다.
 #    화면에는 보여 주지 않는다. 직접 정하고 싶으면:
 #        bash sfpc-judge-install.sh --token
+#    본서버에 옮겨 적지 않고 건네주려면 (3분 동안 · 본서버에게만 · 한 번만):
+#        bash sfpc-judge-install.sh --share-token
 #  ● 대상: Ubuntu 24.04 LTS, x86_64
 #
 #  원본 install.sh 의 Judge0 설치 절차를 그대로 따랐다 (판 · 비밀번호 처리 · cgroup v1).
@@ -47,10 +49,12 @@ mkdir -p "$STATE_DIR"
 # ── 인자 ────────────────────────────────────────────────────────
 ALLOW=()
 DO_TOKEN=0
+DO_SHARE=0
 while (( $# )); do
   case "$1" in
     --allow) [[ $# -ge 2 ]] || die "--allow 뒤에 주소가 없습니다"; ALLOW+=("$2"); shift 2 ;;
     --token) DO_TOKEN=1; shift ;;
+    --share-token) DO_SHARE=1; shift ;;
     *) die "모르는 옵션: $1" ;;
   esac
 done
@@ -76,6 +80,41 @@ if (( DO_TOKEN )); then
   ( umask 077; printf '%s\n' "$t1" > "$TOKEN_FILE" )
   ( cd "$JUDGE0_DIR" && docker compose up -d --force-recreate server workers ) >> "$LOG" 2>&1
   say "  바꿨습니다. 본서버의 서버 모니터링 화면에도 같은 글자열을 넣어 주세요."
+  exit 0
+fi
+
+# ── 인증 글자열을 본서버에 건네주기 ─────────────────────────────
+#   사람이 옮겨 적지 않도록, 3분 동안 · 허용한 주소(본서버)에게만 · 한 번만 내준다.
+#   본서버의 서버 모니터링 화면에서 "가져오기"를 누르면 받아 간다.
+if (( DO_SHARE )); then
+  [[ -s "$TOKEN_FILE" && -s "$STATE_DIR/allow" ]] || die "아직 설치되지 않았습니다. 먼저 설치하세요."
+  SP=2359
+  fw_off() {
+    while read -r ip; do [[ -n "$ip" ]] && iptables -D INPUT -p tcp --dport $SP -s "$ip" -j ACCEPT 2>/dev/null || true; done < "$STATE_DIR/allow"
+    iptables -D INPUT -p tcp --dport $SP -j DROP 2>/dev/null || true
+  }
+  trap fw_off EXIT
+  iptables -I INPUT -p tcp --dport $SP -j DROP
+  while read -r ip; do [[ -n "$ip" ]] && iptables -I INPUT -p tcp --dport $SP -s "$ip" -j ACCEPT; done < "$STATE_DIR/allow"
+  say "  waiting 180s: press the pull button on the main server now / 3분 동안 기다립니다. 본서버에서 \"가져오기\"를 누르세요."
+  rc=0
+  timeout 180 python3 - "$TOKEN_FILE" "$SP" <<'PY' || rc=$?
+import sys, http.server
+tok = open(sys.argv[1]).read().strip().encode()
+done = False
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        global done
+        if self.path != '/t' or done:
+            self.send_response(404); self.end_headers(); return
+        done = True
+        self.send_response(200); self.send_header('Content-Type', 'text/plain')
+        self.send_header('Content-Length', str(len(tok))); self.end_headers(); self.wfile.write(tok)
+    def log_message(self, *a): pass
+s = http.server.HTTPServer(('0.0.0.0', int(sys.argv[2])), H)
+while not done: s.handle_request()
+PY
+  if (( rc == 0 )); then say "  OK: handed over once / 건네주었습니다."; else say "  TIMEOUT: nobody came / 아무도 받아 가지 않았습니다."; fi
   exit 0
 fi
 
