@@ -34,6 +34,7 @@ TOKEN_FILE="/root/sfpc-judge-token.txt"
 FW_SCRIPT="/usr/local/sbin/sfpc-judge-fw"
 FW_UNIT="/etc/systemd/system/sfpc-judge-fw.service"
 PORT=2358
+QUEUE_SIZE=10000
 
 export DEBIAN_FRONTEND=noninteractive
 APT=(apt-get -y -q -o DPkg::Lock::Timeout=600
@@ -246,6 +247,10 @@ if [[ -z "$(conf_get AUTHN_TOKEN)" ]]; then
   conf_set AUTHN_TOKEN "$(openssl rand -hex 12)"
 fi
 ( umask 077; conf_get AUTHN_TOKEN > "$TOKEN_FILE" )
+# 대기열 크기. 기본 100칸은 테스트케이스 20개짜리 제출 다섯 건이면 찬다. 차면 Judge0 가 503 으로 거절하고,
+# 본서버가 같은 제출을 다시 밀어 넣으면서 앞서 받아 준 조각만 헛돌아 채점이 멈춘다 (11/26 부하 시험에서 확인).
+# 얼마나 맡길지는 본서버가 조절하므로 여기서는 넉넉히 둔다.
+conf_set MAX_QUEUE_SIZE "$QUEUE_SIZE"
 chmod 644 judge0.conf
 # 바깥(본서버)에서 닿아야 하므로 모든 주소에서 듣게 둔다. 누가 닿을 수 있는지는 위의 방화벽이 정한다.
 sed -i -E 's/^(\s*-\s*)"127\.0\.0\.1:2358:2358"/\1"2358:2358"/' docker-compose.yml
