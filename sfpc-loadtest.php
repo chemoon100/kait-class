@@ -14,7 +14,9 @@
 
      --rate=65      1분에 넣을 제출 수 (작년 대회: 평균 65 · 가장 바쁜 10분 110 · 가장 바쁜 1분 188)
      --minutes=3    넣는 시간. 다 넣은 뒤 대기열이 빌 때까지(최대 --drain 분) 기다렸다가 결과를 적는다
-     --mix=last     last = 작년 판정 비율(AC 22 · WA 65 · RE 8 · TLE 3 · CE 2), tle = 시간 초과가 많은 최악의 경우
+     --mix=last     last = 작년 판정 비율(AC 22 · WA 65 · RE 8 · TLE 3 · CE 2)이고 틀린 풀이는 첫 케이스부터 틀린다
+                    real = 같은 비율인데 틀린 풀이의 절반은 중간 어딘가의 케이스에서 틀린다 (실제에 더 가깝다)
+                    tle  = 시간 초과가 많은 최악의 경우
      --set=light    light = 가벼운 문제 · heavy = 무거운 문제(제한 시간의 절반을 쓰는 계산 · 0.6MB 출력 · 150MB 메모리 · 케이스 50개) · all
      --lazy=1       틀리면 멈추기를 켜고(1) 끄고(0) 시작한다. 적지 않으면 지금 설정 그대로
      --label=이름   결과에 붙일 이름
@@ -98,7 +100,8 @@ if (isset($opt['cleanup'])) {
 if (!isset($opt['run']) && !isset($opt['bad'])) { say('usage: --setup | --run --rate=65 --minutes=3 [--mix=last|tle] [--set=light|heavy|all] [--lazy=0|1] [--label=x] | --bad | --cleanup'); exit(1); }
 
 /* ── 넣을 코드 ── */
-function lt_source(string $kind, string $lang, int $nonce, string $type = 'sum'): string {
+/* $failN 을 주면 "입력이 그 값인 케이스에서만" 틀린다 — 처음부터 틀리는 풀이가 아니라 중간 어딘가에서 틀리는 풀이 */
+function lt_source(string $kind, string $lang, int $nonce, string $type = 'sum', ?int $failN = null): string {
   /* 정답의 본문 (문제 종류마다 다르다). 오답은 같은 계산을 하고 틀린 값을 낸다. */
   if ($lang === 'c') {
     $head = "/* expect:$kind #$nonce */\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\nint main(){long long n,s=0,i;if(scanf(\"%lld\",&n)!=1)return 0;\n";
@@ -106,9 +109,9 @@ function lt_source(string $kind, string $lang, int $nonce, string $type = 'sum')
              'out' => "for(i=1;i<n;i++)printf(\"%lld\\n\",i);s=n;", 'mem' => "{char*p=malloc(n<<20);if(!p)return 1;memset(p,7,n<<20);s=n+p[n]-7;}"][$type];
     return match ($kind) {
       'AC'  => $head . $body . "printf(\"%lld\\n\",s);return 0;}\n",
-      'WA'  => $head . $body . "printf(\"%lld\\n\",s+1);return 0;}\n",
-      'TLE' => $head . "for(;;){s+=n;}return 0;}\n",
-      'RE'  => $head . "{volatile int *p=0;*p=(int)n;}return 0;}\n",
+      'WA'  => $head . $body . ($failN === null ? "printf(\"%lld\\n\",s+1);return 0;}\n" : "printf(\"%lld\\n\",n=={$failN}LL?s+1:s);return 0;}\n"),
+      'TLE' => $failN === null ? $head . "for(;;){s+=n;}return 0;}\n" : $head . "if(n=={$failN}LL){volatile long long z=0;for(;;){z+=n;}}" . $body . "printf(\"%lld\\n\",s);return 0;}\n",
+      'RE'  => $failN === null ? $head . "{volatile int *p=0;*p=(int)n;}return 0;}\n" : $head . "if(n=={$failN}LL){volatile int *p=0;*p=(int)n;}" . $body . "printf(\"%lld\\n\",s);return 0;}\n",
       'CE'  => $head . "printf(\"%lld\\n\",s)\nreturn 0;}\n",
     };
   }
@@ -117,9 +120,9 @@ function lt_source(string $kind, string $lang, int $nonce, string $type = 'sum')
            'out' => "print('\\n'.join(map(str, range(1, n))))\ns = n\n", 'mem' => "b = bytearray(b'x') * (n << 20)\ns = n + b[n] - 120\n"][$type];
   return match ($kind) {
     'AC'  => $head . $body . "print(s)\n",
-    'WA'  => $head . $body . "print(s + 1)\n",
-    'TLE' => $head . "while True:\n    n += 1\n",
-    'RE'  => $head . "print(1 // (n - n))\n",
+    'WA'  => $head . $body . ($failN === null ? "print(s + 1)\n" : "print(s + 1 if n == {$failN} else s)\n"),
+    'TLE' => $failN === null ? $head . "while True:\n    n += 1\n" : $head . "z = 0\nwhile n == {$failN}:\n    z += 1\n" . $body . "print(s)\n",
+    'RE'  => $failN === null ? $head . "print(1 // (n - n))\n" : $head . "if n == {$failN}:\n    print(1 // (n - n))\n" . $body . "print(s)\n",
     'CE'  => $head . "print(s\n",          /* 파이썬은 컴파일 단계가 없어 런타임 오류로 나온다 */
   };
 }
@@ -185,6 +188,8 @@ if (isset($opt['bad'])) {
   exit(0);
 }
 $mixName = (string)($opt['mix'] ?? 'last');
+/* real = 판정 비율은 작년과 같되, 틀린 제출의 절반은 "중간 어딘가의 케이스 하나"에서 틀린다 (어느 케이스인지는 고르게 뽑는다).
+   last 는 틀린 제출이 모두 첫 케이스부터 틀려서, 틀리면 멈추기에 가장 유리한 경우다. */
 $MIX = $mixName === 'tle' ? ['AC' => 20, 'WA' => 45, 'RE' => 8, 'TLE' => 25, 'CE' => 2] : ['AC' => 22, 'WA' => 65, 'RE' => 8, 'TLE' => 3, 'CE' => 2];
 function lt_pick(array $w): string { $r = mt_rand(1, array_sum($w)); foreach ($w as $k => $v) { if (($r -= $v) <= 0) return $k; } return array_key_first($w); }
 
@@ -203,6 +208,7 @@ foreach (LT_PROBS as $no => $def) {
 }
 if (!$uids || !$pids) { say('run --setup first'); exit(1); }
 $cases = []; foreach ($pids as $pid) $cases[$pid] = (int)col("SELECT COUNT(*) FROM testcases WHERE problem_id = ?", [$pid]);
+$inputs = []; foreach ($pids as $pid) $inputs[$pid] = array_map(fn($r) => (int)trim((string)$r['input']), all("SELECT input FROM testcases WHERE problem_id = ? ORDER BY seq, id", [$pid]));
 
 $hasPool = (bool)db()->query("SELECT 1 FROM pragma_table_info('submissions') WHERE name = 'dispatched_at'")->fetchColumn();
 $startId = (int)col("SELECT COALESCE(MAX(id), 0) FROM submissions");
@@ -226,7 +232,9 @@ while ($sent < $total) {
     $kind = lt_pick($MIX);
     $lang = ($kind === 'CE' || mt_rand(1, 100) <= 14) ? 'c' : 'py';
     $pid = $pids[mt_rand(0, count($pids) - 1)];
-    $src = lt_source($kind, $lang, $startId * 100000 + $sent, $ptype[$pid]);
+    $failN = null;
+    if ($mixName === 'real' && in_array($kind, ['WA', 'TLE', 'RE'], true) && mt_rand(0, 1)) $failN = $inputs[$pid][mt_rand(0, count($inputs[$pid]) - 1)];
+    $src = lt_source($kind, $lang, $startId * 100000 + $sent, $ptype[$pid], $failN);
     $ins->execute([$uids[$sent % count($uids)], $pid, $lang, $src, source_hash($src), now(), now()]);
     $sent++;
   }
@@ -274,6 +282,7 @@ $res = [
   'send_sec' => round($tSent), 'total_sec' => round($tAll), 'drain_sec' => round($tAll - $tSent),
   'throughput_per_min' => $tAll > 0 ? round((count($rows) - $left) / $tAll * 60, 1) : 0, 'best_minute' => $perMin ? max($perMin) : 0,
   'max_backlog' => $maxBacklog, 'wait' => $stat($wait), 'queue_wait' => $stat($queue), 'judge_time' => $stat($judge),
+  'passed_avg' => $rows ? round(array_sum(array_map(fn($r) => (int)(one("SELECT passed_count FROM submissions WHERE id = ?", [$r['id']])['passed_count'] ?? 0), $rows)) / count($rows), 1) : 0,
   'verdicts' => $ver, 'mismatch' => $mismatch, 'ie' => $ver['IE'] ?? 0, 'moved' => $moved, 'by_server' => $bySrvN, 'series' => $series,
 ];
 @file_put_contents($dir . '/' . date('Ymd-His', (int)$t0) . '-' . $label . '.json', json_encode($res, JSON_UNESCAPED_UNICODE), LOCK_EX);
