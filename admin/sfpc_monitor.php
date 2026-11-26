@@ -40,6 +40,30 @@ if (isset($_GET['json']) || isset($_GET['hist'])) {
       foreach (all("SELECT ts, data FROM sfpc_monitor WHERE ts >= ? ORDER BY ts", [time() - max(600, min(86400, (int)($_GET['sec'] ?? 3600)))]) as $r) $out[] = ['t' => (int)$r['ts']] + (json_decode($r['data'], true) ?: []);
     echo json_encode($out); exit;
   }
+  /* 제출 하나하나의 상태 — 채점 중 · 대기 · 방금 끝난 것. DOMjudge 의 제출 목록처럼 테스트케이스 칸을 그릴 수 있게 내준다. */
+  $subs = (function () {
+    $cols = array_column(db()->query("PRAGMA table_info(submissions)")->fetchAll(PDO::FETCH_ASSOC), 'name');
+    $x = in_array('judge_pos', $cols, true) ? 's.judge_pos, s.judge_srv, s.dispatched_at, s.judge_tries' : '0 AS judge_pos, NULL AS judge_srv, NULL AS dispatched_at, 0 AS judge_tries';
+    $sel = "SELECT s.id, s.lang, s.state, s.verdict, s.passed_count, s.total_count, s.max_time, s.priority, s.tokens, s.judged_at, COALESCE(s.queued_at, s.created_at) AS q, $x,
+              u.name AS uname, u.login_id, p.prob_no, p.title
+            FROM submissions s JOIN users u ON u.id = s.user_id JOIN problems p ON p.id = s.problem_id";
+    $names = []; foreach (pool_servers() as $k => $sv) $names[$k] = $sv['name'];
+    $now = time();
+    $fmt = function (array $r) use ($names, $now) {
+      $q = strtotime((string)$r['q']) ?: $now; $d = strtotime((string)($r['dispatched_at'] ?? '')) ?: 0; $j = strtotime((string)($r['judged_at'] ?? '')) ?: 0;
+      $run = 0; if ($r['state'] === 'judging' && (string)$r['tokens'] !== '') { $t = json_decode((string)$r['tokens'], true); $run = is_array($t) ? count($t) : 0; }
+      $done = in_array($r['state'], ['done', 'error'], true);
+      return ['id' => (int)$r['id'], 'who' => (string)($r['uname'] !== '' ? $r['uname'] : $r['login_id']), 'login' => (string)$r['login_id'], 'no' => (int)$r['prob_no'], 'title' => mb_substr((string)$r['title'], 0, 30),
+              'lang' => (string)$r['lang'], 'state' => (string)$r['state'], 'verdict' => $r['verdict'], 'rejudge' => (int)$r['priority'] > 0, 'tries' => (int)$r['judge_tries'],
+              'pass' => $done ? (int)$r['passed_count'] : (int)$r['judge_pos'], 'run' => $run, 'total' => (int)$r['total_count'],
+              'wait' => max(0, ($done && $j ? $j : $now) - $q), 'judge' => $done && $j && $d ? max(0, $j - $d) : null, 'time' => $r['max_time'] !== null ? round((float)$r['max_time'], 2) : null,
+              'srv' => $r['judge_srv'] !== null && $r['judge_srv'] !== '' ? ($names[(string)$r['judge_srv']] ?? '?') : '', 'at' => $done && $j ? date('H:i:s', $j) : date('H:i:s', $q)];
+    };
+    return ['judging' => array_map($fmt, all("$sel WHERE s.state = 'judging' ORDER BY s.id LIMIT 60")),
+            'pending' => array_map($fmt, all("$sel WHERE s.state = 'pending' ORDER BY s.priority, s.id LIMIT 15")),
+            'pending_total' => (int)col("SELECT COUNT(*) FROM submissions WHERE state = 'pending'"),
+            'recent' => array_map($fmt, all("$sel WHERE s.state IN ('done','error') ORDER BY s.judged_at DESC, s.id DESC LIMIT 25"))];
+  })();
   $hb = DATA_DIR . '/worker.heartbeat'; $pf = DATA_DIR . '/judge_pool.json';
   $pool = is_file($pf) ? json_decode((string)file_get_contents($pf), true) : null;
   $dbf = defined('DB_PATH') ? DB_PATH : (DATA_DIR . '/kait-class.db');
@@ -50,6 +74,7 @@ if (isset($_GET['json']) || isset($_GET['hist'])) {
     'pool' => $pool, 'pool_age' => $pool ? time() - (int)$pool['at'] : null,
     'dbsize' => is_file($dbf) ? (int)(filesize($dbf) / 1024) : null, 'walsize' => is_file($dbf . '-wal') ? (int)(filesize($dbf . '-wal') / 1024) : 0,
     'teams' => (int)col("SELECT COUNT(DISTINCT user_id) FROM submissions WHERE created_at >= ?", [date('Y-m-d H:i:s', time() - 300)]),
+    'subs' => $subs,
   ], JSON_UNESCAPED_UNICODE);
   exit;
 }
@@ -106,6 +131,10 @@ sfpc_css('../');
 
   <h2>채점 <span>제출이 밀리지 않고 처리되는지</span></h2>
   <div class="mon-grid" id="gJudge"></div>
+  <h2>제출 하나하나 <span>지금 채점 중인 것 · 기다리는 것 · 방금 끝난 것. 칸 하나가 테스트케이스 하나입니다</span></h2>
+  <div class="mon-subs" id="gSubs"></div>
+  <div class="mon-legend small muted"><span><i class="c ok"></i>통과</span><span><i class="c run"></i>채점 중</span><span><i class="c bad"></i>여기서 틀려 멈춤</span><span><i class="c"></i>돌리지 않음</span>
+    · 틀리면 거기서 멈추므로 뒤쪽 칸은 비어 있습니다 · 칸은 조각(3 · 6 · 12 · 20개) 단위로 채워집니다</div>
   <h2>채점 서버 <span>Judge0 마다 살아 있는지, 얼마나 맡겨 두었는지</span></h2>
   <div class="mon-grid" id="gPool"></div>
   <h2>본서버 <span>이 사이트가 돌아가는 기계</span></h2>
@@ -182,6 +211,38 @@ sfpc_css('../');
     var il = lv(j.ie_10m, 1, 5); if (il === 'bad') bad.push('채점 오류 ' + j.ie_10m + '건');
     h += card('채점 오류 (최근 10분)', j.ie_10m + '<small>건</small>', il, il === 'ok' ? '채점 자체가 실패한 제출. 0 이 정상입니다.' : '채점 서버에 문제가 있었습니다. 원인을 고친 뒤 재채점 탭에서 "채점 오류만"으로 다시 돌립니다.');
     $('gJudge').innerHTML = h;
+
+    /* ── 제출 하나하나 ── */
+    if (d.subs) {
+      var V = { AC: '맞았습니다', WA: '틀렸습니다', TLE: '시간 초과', MLE: '메모리 초과', RE: '런타임 오류', CE: '컴파일 오류', IE: '채점 오류' };
+      var strip = function (x) {
+        var n = x.total, done = x.state === 'done' || x.state === 'error', failAt = done && x.verdict !== 'AC' && x.verdict !== 'CE' && x.verdict !== 'IE' ? x.pass : -1;
+        if (!n) return '<span class="muted small">' + (done && x.verdict === 'CE' ? '컴파일에서 멈춤' : '–') + '</span>';
+        if (n > 60) {      /* 케이스가 아주 많으면 칸 대신 막대 */
+          var a = 100 * x.pass / n, r = 100 * x.run / n;
+          return '<div class="mon-strip bar"><b class="ok" style="width:' + a + '%"></b>' + (x.run ? '<b class="run" style="width:' + r + '%"></b>' : '') + (failAt >= 0 ? '<b class="bad" style="width:' + Math.max(2, 100 / n) + '%"></b>' : '') + '</div>';
+        }
+        var o = '<div class="mon-strip">';
+        for (var i = 0; i < n; i++) o += '<i class="' + (i < x.pass ? 'ok' : (i === failAt ? 'bad' : (!done && i < x.pass + x.run ? 'run' : ''))) + '"></i>';
+        return o + '</div>';
+      };
+      var row = function (x, kind) {
+        var st = kind === 'p' ? '<span class="v v-wait">대기</span>' : (kind === 'j' ? '<span class="v v-open">채점 중</span>' : '<span class="v v-' + esc(x.verdict || 'IE') + '" title="' + (V[x.verdict] || '') + '">' + esc(x.verdict || '?') + '</span>');
+        var wl = kind === 'r' ? '' : (x.wait >= 120 ? ' bad' : (x.wait >= 30 ? ' warn' : ''));
+        return '<tr class="' + kind + '"><td class="num"><a href="../results.php?id=' + x.id + '">' + x.id + '</a></td><td>' + st + (x.rejudge ? ' <span class="small muted">재채점</span>' : '') + (x.tries > 1 ? ' <span class="small muted" title="다른 채점 서버로 옮겨진 횟수">×' + x.tries + '</span>' : '') + '</td>'
+          + '<td class="who" title="' + esc(x.login) + '">' + esc(x.who) + '</td><td class="prob" title="' + esc(x.title) + '">' + x.no + ' <span class="muted">' + esc(x.title) + '</span></td><td>' + esc(x.lang) + '</td>'
+          + '<td>' + strip(x) + '</td><td class="num">' + (x.total ? x.pass + ' / ' + x.total : '') + '</td>'
+          + '<td class="num' + wl + '">' + fmtSec(x.wait) + '</td><td class="num">' + (x.time !== null && kind === 'r' ? x.time.toFixed(2) + '초' : '') + '</td><td>' + esc(x.srv) + '</td><td class="num muted">' + x.at + '</td></tr>';
+      };
+      var s = d.subs, t = '';
+      s.judging.forEach(function (x) { t += row(x, 'j'); });
+      s.pending.forEach(function (x) { t += row(x, 'p'); });
+      if (s.pending_total > s.pending.length) t += '<tr class="more"><td colspan="11">… 기다리는 제출이 ' + (s.pending_total - s.pending.length) + '건 더 있습니다</td></tr>';
+      if (!s.judging.length && !s.pending_total) t += '<tr class="more"><td colspan="11">지금 채점 중이거나 기다리는 제출이 없습니다</td></tr>';
+      if (s.recent.length) t += '<tr class="sep"><td colspan="11">방금 끝난 제출</td></tr>';
+      s.recent.forEach(function (x) { t += row(x, 'r'); });
+      $('gSubs').innerHTML = '<div class="tablewrap"><table class="list mon-subtable"><thead><tr><th class="num">번호</th><th>상태</th><th>팀 · 사용자</th><th>문제</th><th>언어</th><th>테스트케이스</th><th class="num">통과</th><th class="num">기다린 시간</th><th class="num">실행</th><th>채점 서버</th><th class="num">시각</th></tr></thead><tbody>' + t + '</tbody></table></div>';
+    }
 
     /* ── 채점 서버 ── */
     h = '';
