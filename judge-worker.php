@@ -111,7 +111,9 @@ function dispatch_one(): bool {
     if (!$row) return null;
     /* [SFPC] 방금 이 제출을 붙들고 있다가 놓친 서버는, 다른 곳이 있으면 피한다 */
     if ((string)$row['judge_srv'] === $srv['key']) { $alt = pool_pick($srv['key']); if ($alt) $srv = $alt; }
-    $d->prepare("UPDATE submissions SET state='judging', judge_srv=?, dispatched_at=?, judge_tries=judge_tries+1 WHERE id=?")
+    /* [SFPC] 대기열에서 집은 제출은 늘 첫 테스트케이스부터 다시 본다 (재채점 · 되돌린 제출 포함) */
+    $d->prepare("UPDATE submissions SET state='judging', judge_srv=?, dispatched_at=?, judge_tries=judge_tries+1,
+                 judge_pos=0, passed_count=NULL, max_time=NULL, max_memory=NULL WHERE id=?")
       ->execute([$srv['key'], now(), $row['id']]);
     return $row;
   });
@@ -121,23 +123,10 @@ function dispatch_one(): bool {
   pool_use($srv);
 
   try {
-    $p = one("SELECT time_limit, memory_limit FROM problems WHERE id=?", [$sub['problem_id']]);
-    if (!$p) throw new RuntimeException('문제를 찾을 수 없습니다');
-
-    $cases = all("SELECT id, seq, input, expected FROM testcases
-                  WHERE problem_id=? ORDER BY seq, id", [$sub['problem_id']]);
-    if (!$cases) throw new RuntimeException('테스트케이스가 없는 문제입니다');
-
-    $tokens = j0_submit(
-      (string)$sub['source_code'], (string)$sub['lang'], $cases,
-      (float)$p['time_limit'], (int)$p['memory_limit']
-    );
-
-    db()->prepare("UPDATE submissions SET tokens=?, total_count=? WHERE id=?")
-        ->execute([json_encode($tokens), count($cases), $sid]);
-
+    /* [SFPC] 테스트케이스를 한꺼번에 넘기지 않고 조각으로 나눠 넘긴다 — 틀리면 거기서 멈춘다 (post_chunk) */
+    $n = post_chunk($sid, $sub, 0);
     pool_ok($srv['key']); $GLOBALS['POOL_STAT']['dispatched']++;
-    wlog("#{$sid} 제출 → " . (pool_multi() ? $srv['name'] : 'Judge0') . " (" . count($cases) . "케이스)");
+    wlog("#{$sid} 제출 → " . (pool_multi() ? $srv['name'] : 'Judge0') . " (" . $n[0] . " / " . $n[1] . "케이스)");
   } catch (Judge0Busy $e) {
     /* 잘못된 제출이 아니다. 대기열로 되돌려 두었다가 다시 보낸다. */
     requeue($sid, $e->getMessage());
@@ -150,6 +139,68 @@ function dispatch_one(): bool {
     pool_use(null);
   }
   return true;
+}
+
+/* ═══ [SFPC] 틀리면 멈추기 ═══════════════════════
+   테스트케이스를 한꺼번에 Judge0 에 넘기면, 첫 케이스에서 틀린 제출도 나머지를 끝까지 돌린다.
+   작년 대회 제출의 78% 가 정답이 아니었다 — 그만큼이 헛일이고, 시간 초과 풀이는 케이스마다 제한 시간을 꽉 채운다.
+   그래서 조각으로 나눠 넘긴다: 앞 조각이 모두 통과해야 다음 조각을 넘긴다. DOMjudge 의 기본 방식(lazy)과 같다.
+   조각은 3 → 6 → 12 → 20 → 20 … 으로 커진다. 틀린 풀이는 대개 앞에서 걸리고, 정답은 주고받는 횟수가 적어야 하기 때문.
+   설정 judge_lazy 가 '0' 이면 예전처럼 한꺼번에 넘긴다 (비교 시험용).
+   판정 · 통과 개수 · 처음 틀린 케이스는 예전과 같다 — 예전에도 처음 틀린 곳까지만 셌다. */
+function lazy_on(): bool {
+  static $memo = true, $at = 0;
+  if (time() - $at >= 5) { $at = time(); $memo = (string)(one("SELECT value FROM settings WHERE key = 'judge_lazy'")['value'] ?? '') !== '0'; }
+  return $memo;
+}
+function chunk_len(int $pos, int $total): int {
+  $left = $total - $pos;
+  if (!lazy_on()) return $left;
+  $at = 0;
+  foreach ([3, 6, 12] as $n) { if ($pos <= $at) return min($n, $left); $at += $n; }
+  return min(J0_BATCH, $left);
+}
+/* $pos 번째부터 한 조각을 넘기고 토큰을 적어 둔다. 지금 쓸 서버는 pool_use 로 정해 둔 것.
+   @return int[] [넘긴 수, 전체 수]   @throws Judge0Busy|RuntimeException */
+function post_chunk(int $sid, array $sub, int $pos): array {
+  $p = one("SELECT time_limit, memory_limit FROM problems WHERE id=?", [$sub['problem_id']]);
+  if (!$p) throw new RuntimeException('문제를 찾을 수 없습니다');
+  $cases = all("SELECT id, seq, input, expected FROM testcases WHERE problem_id=? ORDER BY seq, id", [$sub['problem_id']]);
+  if (!$cases) throw new RuntimeException('테스트케이스가 없는 문제입니다');
+  $part = array_slice($cases, $pos, chunk_len($pos, count($cases)));
+  if (!$part) throw new RuntimeException('넘길 테스트케이스가 없습니다');
+  $tokens = j0_submit((string)$sub['source_code'], (string)$sub['lang'], $part, (float)$p['time_limit'], (int)$p['memory_limit']);
+  db()->prepare("UPDATE submissions SET tokens=?, total_count=?, judge_pos=?, dispatched_at=? WHERE id=?")
+      ->execute([json_encode($tokens), count($cases), $pos, now(), $sid]);
+  return [count($part), count($cases)];
+}
+/* 앞 조각을 통과하고 다음 조각을 기다리는 제출들 (judging · 토큰 없음 · judge_pos > 0). 맡겼던 서버에 이어서 넘긴다. */
+function continue_chunks(): bool {
+  $rows = all("SELECT id, problem_id, lang, source_code, judge_srv, judge_pos, COALESCE(queued_at, created_at) AS queued_at
+               FROM submissions WHERE state='judging' AND (tokens IS NULL OR tokens='') AND judge_pos > 0 ORDER BY id LIMIT 60");
+  if (!$rows) return false;
+  $servers = pool_servers(); $worked = false;
+  foreach ($rows as $r) {
+    $sid = (int)$r['id'];
+    $srv = $servers[(string)$r['judge_srv']] ?? reset($servers);
+    if (!pool_state($srv['key'])['alive']) continue;          /* 죽은 서버의 것은 pool_fail 이 대기열로 되돌린다 */
+    pool_use($srv);
+    try {
+      post_chunk($sid, $r, (int)$r['judge_pos']);
+      pool_ok($srv['key']); $worked = true;
+    } catch (Judge0Busy $e) {
+      if (!in_array($e->getCode(), [503, 429], true)) pool_fail($srv['key'], $e->getMessage());
+      if (strtotime((string)$r['queued_at']) < time() - STALE_MIN * 60) fail_submission($sid, $e->getMessage() . ' (' . STALE_MIN . '분 넘게 재시도)');
+      log_busy($e->getMessage());
+      usleep(BUSY_SLEEP);
+      break;                                                   /* 이 서버가 바쁘다 — 다음 차례에 다시 */
+    } catch (Throwable $e) {
+      fail_submission($sid, $e->getMessage());
+    } finally {
+      pool_use(null);
+    }
+  }
+  return $worked;
 }
 
 /* 다시 시도하려고 대기열로 되돌린다.
@@ -167,7 +218,7 @@ function requeue(int $sid, string $why): void {
 /* ═══ 2) 채점 중인 제출들의 결과를 거둔다 ═══ */
 function collect(): bool {
   /* [SFPC] 서버가 여러 대면 그만큼 더 많이 본다. 어느 서버에 맡겼는지도 함께 읽는다. */
-  $rows = all("SELECT id, problem_id, tokens, judge_srv, COALESCE(queued_at, created_at) AS queued_at
+  $rows = all("SELECT id, problem_id, tokens, judge_srv, judge_pos, max_time, max_memory, COALESCE(queued_at, created_at) AS queued_at
                FROM submissions
                WHERE state='judging' AND tokens IS NOT NULL AND tokens<>''
                ORDER BY id LIMIT " . max(COLLECT_MAX, pool_capacity()));
@@ -212,20 +263,32 @@ function collect(): bool {
 
     $cases = all("SELECT seq, input, expected FROM testcases WHERE problem_id=? ORDER BY seq, id",
                  [$r['problem_id']]);
-    finish_submission($sid, $res, $cases);
-    $GLOBALS['POOL_STAT']['finished']++;
+    /* [SFPC] 이번 조각만 본다. 틀렸거나 마지막 조각이면 확정하고, 아니면 다음 조각을 넘긴다. */
+    $pos = (int)$r['judge_pos'];
+    $ev  = judge_chunk($sid, $res, array_slice($cases, $pos, count($tokens)));
+    $ev['passed'] += $pos;
+    $ev['maxTime'] = max($ev['maxTime'], (float)($r['max_time'] ?? 0));
+    $ev['maxMem']  = max($ev['maxMem'],  (int)($r['max_memory'] ?? 0));
     $worked = true;
+    if ($ev['verdict'] === null && $ev['passed'] < count($cases)) {
+      db()->prepare("UPDATE submissions SET tokens='', judge_pos=?, passed_count=?, max_time=?, max_memory=? WHERE id=?")
+          ->execute([$ev['passed'], $ev['passed'], $ev['maxTime'], $ev['maxMem'], $sid]);
+      continue;                                   /* continue_chunks 가 이어서 넘긴다 */
+    }
+    finish_submission($sid, $ev, count($cases));
+    $GLOBALS['POOL_STAT']['finished']++;
   }
   return $worked;
 }
 
 /* ═══ 판정 ═══════════════════════════════════════
    테스트케이스를 순서대로 보며 처음 실패한 지점에서 확정한다. */
-function finish_submission(int $sid, array $res, array $cases): void {
+/* [SFPC] 한 조각을 판정한다. 모두 통과했으면 verdict 는 null (아직 모른다 — 다음 조각이 남았을 수 있다). */
+function judge_chunk(int $sid, array $res, array $cases): array {
   $memLimit = (int)col("SELECT p.memory_limit FROM submissions s
                         JOIN problems p ON p.id=s.problem_id WHERE s.id=?", [$sid]);
 
-  $verdict = 'AC';
+  $verdict = null;
   $passed  = 0;
   $failSeq = null;
   $compile = '';
@@ -274,15 +337,21 @@ function finish_submission(int $sid, array $res, array $cases): void {
     $passed++;
   }
 
+  return ['verdict' => $verdict, 'passed' => $passed, 'failSeq' => $failSeq, 'compile' => $compile,
+          'maxTime' => $maxTime, 'maxMem' => $maxMem, 'fIn' => $fIn, 'fExp' => $fExp, 'fGot' => $fGot];
+}
+/* 판정을 적는다. $ev 는 judge_chunk 의 결과에 앞 조각들의 통과 수 · 최대 시간 · 최대 메모리를 합친 것. */
+function finish_submission(int $sid, array $ev, int $total): void {
+  $verdict = $ev['verdict'] ?? 'AC';
   db()->prepare("UPDATE submissions SET state='done', verdict=?, passed_count=?,
                  total_count=?, max_time=?, max_memory=?, compile_msg=?, fail_seq=?,
                  fail_input=?, fail_expected=?, fail_output=?, judged_at=? WHERE id=?")
-      ->execute([$verdict, $passed, count($cases), $maxTime, $maxMem,
-                 mb_substr($compile, 0, 4000), $failSeq,
-                 $fIn, $fExp, $fGot, now(), $sid]);
+      ->execute([$verdict, $ev['passed'], $total, $ev['maxTime'], $ev['maxMem'],
+                 mb_substr((string)$ev['compile'], 0, 4000), $ev['failSeq'],
+                 $ev['fIn'], $ev['fExp'], $ev['fGot'], now(), $sid]);
 
-  wlog("#{$sid} → {$verdict} ({$passed}/" . count($cases) . ", "
-       . number_format($maxTime, 3) . "s, {$maxMem}KB)");
+  wlog("#{$sid} → {$verdict} ({$ev['passed']}/{$total}, "
+       . number_format($ev['maxTime'], 3) . "s, {$ev['maxMem']}KB)");
 }
 
 /* 채점 자체가 실패한 경우 */
@@ -414,8 +483,9 @@ while ($running) {
     /* 직접 실행을 먼저 본다. 한 건짜리라 금방 끝나고, 학생이 바로 앞에서 기다린다. */
     $r1 = dispatch_run();
     $r2 = collect_runs();
-    $a  = dispatch_one();
     $b  = collect();
+    $c  = continue_chunks();   /* [SFPC] 앞 조각을 통과한 제출의 다음 조각 — 새 제출보다 먼저 */
+    $a  = dispatch_one() || $c;
     heartbeat();
     sweep_runs();
     pool_tick();          /* [SFPC] 채점 서버가 살아 있는지 살피고, 죽은 서버의 제출을 되돌린다 */

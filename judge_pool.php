@@ -61,6 +61,7 @@ function pool_init(): void {
   if (!in_array('judge_srv', $c, true))      db()->exec("ALTER TABLE submissions ADD COLUMN judge_srv TEXT");
   if (!in_array('dispatched_at', $c, true))  db()->exec("ALTER TABLE submissions ADD COLUMN dispatched_at TEXT");
   if (!in_array('judge_tries', $c, true))    db()->exec("ALTER TABLE submissions ADD COLUMN judge_tries INTEGER NOT NULL DEFAULT 0");
+  if (!in_array('judge_pos', $c, true))      db()->exec("ALTER TABLE submissions ADD COLUMN judge_pos INTEGER NOT NULL DEFAULT 0");   /* 여기까지의 테스트케이스는 통과했다 (틀리면 멈추기) */
   if (!in_array('judge_srv', $cols('runs'), true)) db()->exec("ALTER TABLE runs ADD COLUMN judge_srv TEXT");
   db()->exec("CREATE TABLE IF NOT EXISTS sfpc_monitor(ts INTEGER PRIMARY KEY, data TEXT NOT NULL)");
 }
@@ -76,7 +77,7 @@ function pool_inflight(string $key): int {
 function pool_ok(string $key): void {
   $s = &pool_state($key);
   if (!$s['alive']) wlog('채점 서버가 돌아왔습니다: ' . (pool_servers()[$key]['name'] ?? $key));
-  $s['alive'] = true; $s['fails'] = 0; $s['down_since'] = 0; $s['last_ok'] = time();
+  $s['alive'] = true; $s['fails'] = 0; $s['down_since'] = 0; $s['last_ok'] = time(); $s['err'] = '';
 }
 /* 응답이 없거나 서버 쪽 고장이다. 연달아 쌓이면 죽은 것으로 보고 맡겼던 제출을 되돌린다 */
 function pool_fail(string $key, string $why): void {
