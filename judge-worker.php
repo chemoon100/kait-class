@@ -15,6 +15,11 @@
                      │                          │
                      └──────── 실패 ────────────┴──> error (verdict=IE)
 
+   [SFPC] 채점 서버 여러 대:
+     어느 Judge0 에 맡길지는 judge_pool.php 가 정한다. 서버가 죽으면 맡겼던 제출을 대기열로 되돌려 다른 서버가 집게 한다.
+     서버를 따로 등록하지 않으면 config 의 judge0_url 한 대만 쓰고, 그때는 예전과 똑같이 돈다.
+     이 파일에서 고친 곳에는 [SFPC] 표시를 해 두었다.
+
    실행:  php /var/www/html/judge-worker.php
    로그:  journalctl -u judge-worker -f
    ═══════════════════════════════════════════════ */
@@ -88,25 +93,32 @@ function log_busy(string $why): void {
 
 /* ═══ 1) 대기 중인 제출 하나를 집어 Judge0 에 넘긴다 ═══ */
 function dispatch_one(): bool {
-  /* 이미 충분히 맡겨 두었으면 더 밀어 넣지 않는다 */
-  if (inflight() >= MAX_INFLIGHT) return false;
+  /* 이미 충분히 맡겨 두었으면 더 밀어 넣지 않는다
+     [SFPC] 맡길 수 있는 양은 살아 있는 채점 서버들의 자리 수의 합. 맡길 서버가 없으면 대기열에 그대로 둔다. */
+  if (inflight() >= pool_capacity()) return false;
+  $srv = pool_pick();
+  if (!$srv) return false;
 
   /* 집는 것과 상태를 바꾸는 것은 한 트랜잭션 안에서. 네트워크 호출은 밖에서. */
-  $sub = tx(function (PDO $d) {
+  $sub = tx(function (PDO $d) use (&$srv) {
     /* 우선순위가 낮은(숫자가 큰) 재채점은 새 제출이 없을 때만 집는다 */
-    $st = $d->prepare("SELECT id, problem_id, lang, source_code
+    $st = $d->prepare("SELECT id, problem_id, lang, source_code, judge_srv
                        FROM submissions WHERE state='pending'
                        ORDER BY priority ASC, id ASC LIMIT 1");
     $st->execute();
     $row = $st->fetch();
     $st->closeCursor();
     if (!$row) return null;
-    $d->prepare("UPDATE submissions SET state='judging' WHERE id=?")->execute([$row['id']]);
+    /* [SFPC] 방금 이 제출을 붙들고 있다가 놓친 서버는, 다른 곳이 있으면 피한다 */
+    if ((string)$row['judge_srv'] === $srv['key']) { $alt = pool_pick($srv['key']); if ($alt) $srv = $alt; }
+    $d->prepare("UPDATE submissions SET state='judging', judge_srv=?, dispatched_at=?, judge_tries=judge_tries+1 WHERE id=?")
+      ->execute([$srv['key'], now(), $row['id']]);
     return $row;
   });
   if (!$sub) return false;
 
   $sid = (int)$sub['id'];
+  pool_use($srv);
 
   try {
     $p = one("SELECT time_limit, memory_limit FROM problems WHERE id=?", [$sub['problem_id']]);
@@ -124,13 +136,18 @@ function dispatch_one(): bool {
     db()->prepare("UPDATE submissions SET tokens=?, total_count=? WHERE id=?")
         ->execute([json_encode($tokens), count($cases), $sid]);
 
-    wlog("#{$sid} 제출 → Judge0 (" . count($cases) . "케이스)");
+    pool_ok($srv['key']); $GLOBALS['POOL_STAT']['dispatched']++;
+    wlog("#{$sid} 제출 → " . (pool_multi() ? $srv['name'] : 'Judge0') . " (" . count($cases) . "케이스)");
   } catch (Judge0Busy $e) {
     /* 잘못된 제출이 아니다. 대기열로 되돌려 두었다가 다시 보낸다. */
     requeue($sid, $e->getMessage());
+    /* [SFPC] 바쁜 것(503 · 429)이 아니라 아예 답이 없으면 서버가 죽었는지 센다 */
+    if (!in_array($e->getCode(), [503, 429], true)) pool_fail($srv['key'], $e->getMessage());
     usleep(BUSY_SLEEP);
   } catch (Throwable $e) {
     fail_submission($sid, $e->getMessage());
+  } finally {
+    pool_use(null);
   }
   return true;
 }
@@ -149,11 +166,13 @@ function requeue(int $sid, string $why): void {
 
 /* ═══ 2) 채점 중인 제출들의 결과를 거둔다 ═══ */
 function collect(): bool {
-  $rows = all("SELECT id, problem_id, tokens, COALESCE(queued_at, created_at) AS queued_at
+  /* [SFPC] 서버가 여러 대면 그만큼 더 많이 본다. 어느 서버에 맡겼는지도 함께 읽는다. */
+  $rows = all("SELECT id, problem_id, tokens, judge_srv, COALESCE(queued_at, created_at) AS queued_at
                FROM submissions
                WHERE state='judging' AND tokens IS NOT NULL AND tokens<>''
-               ORDER BY id LIMIT " . COLLECT_MAX);
+               ORDER BY id LIMIT " . max(COLLECT_MAX, pool_capacity()));
   if (!$rows) return false;
+  $servers = pool_servers();
 
   $worked = false;
   foreach ($rows as $r) {
@@ -161,15 +180,23 @@ function collect(): bool {
     $tokens = json_decode((string)$r['tokens'], true);
     if (!is_array($tokens) || !$tokens) { fail_submission($sid, '토큰이 손상되었습니다'); continue; }
 
+    /* [SFPC] 맡긴 서버에게 묻는다. 죽은 것으로 표시된 서버의 것은 건너뛴다 (이미 대기열로 되돌렸다). */
+    $srv = $servers[(string)$r['judge_srv']] ?? reset($servers);
+    if (!pool_state($srv['key'])['alive']) continue;
+    pool_use($srv);
     try {
       $res = j0_fetch($tokens);
+      pool_ok($srv['key']);
     } catch (Judge0Busy $e) {
+      if (!in_array($e->getCode(), [503, 429], true)) pool_fail($srv['key'], $e->getMessage());
       log_busy($e->getMessage());
       usleep(BUSY_SLEEP);
       continue;   /* 상태를 그대로 두고 다음 차례에 다시 본다 */
     } catch (Throwable $e) {
       wlog("#{$sid} 결과 조회 실패 (다음 차례에 다시 시도): " . $e->getMessage());
       continue;
+    } finally {
+      pool_use(null);
     }
 
     /* 하나라도 아직 안 끝났으면 기다린다 */
@@ -186,6 +213,7 @@ function collect(): bool {
     $cases = all("SELECT seq, input, expected FROM testcases WHERE problem_id=? ORDER BY seq, id",
                  [$r['problem_id']]);
     finish_submission($sid, $res, $cases);
+    $GLOBALS['POOL_STAT']['finished']++;
     $worked = true;
   }
   return $worked;
@@ -284,6 +312,10 @@ function dispatch_run(): bool {
   if (!$run) return false;
 
   $rid = (int)$run['id'];
+  /* [SFPC] 직접 실행도 살아 있는 서버로. 맡길 곳이 없으면 잠시 뒤에 다시 */
+  $srv = pool_pick();
+  if (!$srv) { db()->prepare("UPDATE runs SET state='pending' WHERE id=?")->execute([$rid]); return false; }
+  pool_use($srv);
   try {
     $lim = $run['problem_id']
       ? one("SELECT time_limit, memory_limit FROM problems WHERE id=?", [$run['problem_id']])
@@ -293,32 +325,42 @@ function dispatch_run(): bool {
 
     $tokens = j0_submit((string)$run['source_code'], (string)$run['lang'],
                         [['input' => (string)$run['stdin']]], $cpu, $mem);
-    db()->prepare("UPDATE runs SET token=? WHERE id=?")->execute([$tokens[0], $rid]);
+    db()->prepare("UPDATE runs SET token=?, judge_srv=? WHERE id=?")->execute([$tokens[0], $srv['key'], $rid]);
     wlog("실행 #{$rid} → Judge0");
   } catch (Judge0Busy $e) {
     db()->prepare("UPDATE runs SET state='pending', token=NULL WHERE id=?")->execute([$rid]);
+    if (!in_array($e->getCode(), [503, 429], true)) pool_fail($srv['key'], $e->getMessage());
     log_busy($e->getMessage());
     usleep(BUSY_SLEEP);
   } catch (Throwable $e) {
     fail_run($rid, $e->getMessage());
+  } finally {
+    pool_use(null);
   }
   return true;
 }
 
 function collect_runs(): bool {
-  $rows = all("SELECT id, token, COALESCE(queued_at, created_at) AS queued_at
+  $rows = all("SELECT id, token, judge_srv, COALESCE(queued_at, created_at) AS queued_at
                FROM runs WHERE state='running' AND token IS NOT NULL ORDER BY id LIMIT 10");
   if (!$rows) return false;
+  $servers = pool_servers();
 
   $worked = false;
   foreach ($rows as $r) {
     $rid = (int)$r['id'];
+    $srv = $servers[(string)$r['judge_srv']] ?? reset($servers);      /* [SFPC] 맡긴 서버에게 묻는다 */
+    if (!pool_state($srv['key'])['alive']) continue;
+    pool_use($srv);
     try {
       $res = j0_fetch([(string)$r['token']]);
     } catch (Judge0Busy $e) {
+      if (!in_array($e->getCode(), [503, 429], true)) pool_fail($srv['key'], $e->getMessage());
       log_busy($e->getMessage()); usleep(BUSY_SLEEP); continue;
     } catch (Throwable $e) {
       wlog("실행 #{$rid} 조회 실패: " . $e->getMessage()); continue;
+    } finally {
+      pool_use(null);
     }
     $one = $res[0] ?? null;
     if (!$one || j0_pending($one)) {
@@ -361,8 +403,9 @@ function sweep_runs(): void {
 }
 
 /* ═══ 메인 루프 ═══════════════════════════════════ */
-wlog('워커 시작 (Judge0: ' . JUDGE0_URL . ', 채점 ' . MAX_INFLIGHT
-     . '건 · 실행 ' . MAX_INFLIGHT_RUN . '건)');
+pool_init();      /* [SFPC] 채점 서버 여러 대를 위한 칸과 상태 기록 표 */
+wlog('워커 시작 (Judge0: ' . implode(', ', array_map(fn($s) => $s['name'] . ' ' . $s['url'] . ' ×' . $s['slots'] . ($s['reserve'] ? ' 예비' : ''), pool_servers()))
+     . ' · 실행 ' . MAX_INFLIGHT_RUN . '건)');
 recover_stuck();
 db()->exec("UPDATE runs SET state='pending', token=NULL WHERE state='running' AND token IS NULL");
 
@@ -375,6 +418,8 @@ while ($running) {
     $b  = collect();
     heartbeat();
     sweep_runs();
+    pool_tick();          /* [SFPC] 채점 서버가 살아 있는지 살피고, 죽은 서버의 제출을 되돌린다 */
+    monitor_sample();     /* [SFPC] 모니터링 화면의 지난 기록 (1분마다) */
     if (!$a && !$b && !$r1 && !$r2) usleep(IDLE_SLEEP);
   } catch (Throwable $e) {
     /* 루프 자체는 절대 죽지 않게 한다 */

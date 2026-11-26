@@ -13,6 +13,18 @@
 declare(strict_types=1);
 require_once __DIR__ . '/lib.php';
 
+/* 모니터링(admin/sfpc_monitor.php)을 위한 요청 기록 — 화면 요청마다 "시각 밀리초 계정번호" 한 줄을 1분 단위 파일에 덧붙인다.
+   주소나 내용은 적지 않는다. 두 시간이 지난 파일은 채점 일꾼이 지운다. (제출 · 채점 확인 같은 api.php 요청은 이 파일을 거치지 않아 빠진다.) */
+if (PHP_SAPI !== 'cli' && !defined('SFPC_REQ_LOGGED')) {
+  define('SFPC_REQ_LOGGED', 1);
+  register_shutdown_function(function () {
+    $dir = DATA_DIR . '/req';
+    if (!is_dir($dir)) @mkdir($dir, 0770, true);
+    $ms = (int)round((microtime(true) - (float)($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true))) * 1000);
+    @file_put_contents($dir . '/' . date('Ymd-Hi') . '.log', time() . ' ' . $ms . ' ' . (int)($_SESSION['uid'] ?? 0) . "\n", FILE_APPEND | LOCK_EX);
+  });
+}
+
 /* 표 구조를 바꿀 때마다 1씩 올린다 */
 const SFPC_SCHEMA = 13;
 

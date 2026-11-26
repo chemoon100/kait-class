@@ -6,6 +6,9 @@
    맞았는지 틀렸는지 판정하는 것은 우리 쪽(judge-worker.php)의 몫이다.
    ═══════════════════════════════════════════════ */
 
+/* [SFPC] 채점 서버 여러 대 — 어느 서버와 이야기할지는 judge_pool.php 가 정한다 (pool_use). 정하지 않으면 예전처럼 judge0_url. */
+require_once __DIR__ . '/judge_pool.php';
+
 /* Judge0 CE 의 기본 배치 상한. 이보다 많으면 나눠 보낸다. */
 const J0_BATCH = 20;
 
@@ -24,18 +27,24 @@ const J0_QUEUE = 1, J0_PROCESSING = 2, J0_ACCEPTED = 3, J0_WRONG = 4,
       J0_TLE = 5, J0_CE = 6, J0_RE_FIRST = 7, J0_RE_LAST = 12,
       J0_INTERNAL = 13, J0_EXEC_FORMAT = 14;
 
-function j0_request(string $method, string $path, ?array $payload = null): array {
-  $ch = curl_init(JUDGE0_URL . $path);
+function j0_request(string $method, string $path, ?array $payload = null, int $timeout = 30): array {
+  /* [SFPC] 정해 둔 서버가 있으면 그 서버로. 웹 화면(언어 목록 등)에서는 등록된 서버 가운데 첫 번째로. */
+  $srv = $GLOBALS['J0_SERVER'] ?? null;
+  if ($srv === null && pool_multi()) foreach (pool_servers() as $one) if ($one['on']) { $srv = $one; break; }
+  $ch = curl_init(($srv['url'] ?? JUDGE0_URL) . $path);
   curl_setopt_array($ch, [
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_CUSTOMREQUEST  => $method,
-    CURLOPT_CONNECTTIMEOUT => 5,
-    CURLOPT_TIMEOUT        => 30,
+    CURLOPT_CONNECTTIMEOUT => min(5, $timeout),
+    CURLOPT_TIMEOUT        => $timeout,
   ]);
+  $headers = [];
+  if (($srv['token'] ?? '') !== '') $headers[] = 'X-Auth-Token: ' . $srv['token'];
   if ($payload !== null) {
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    $headers[] = 'Content-Type: application/json';
   }
+  if ($headers) curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
   $body = curl_exec($ch);
   $err  = curl_error($ch);
   $http = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -86,7 +95,7 @@ function j0_submit(string $sourceCode, string $langKey, array $cases,
     $r = j0_request('POST', '/submissions/batch?base64_encoded=true', ['submissions' => $subs]);
     if (!$r['ok'] || !is_array($r['data'])) {
       $why = $r['error'] ?: 'HTTP ' . $r['http'];
-      if (j0_retryable($r['http'])) throw new Judge0Busy($why);
+      if (j0_retryable($r['http'])) throw new Judge0Busy($why, $r['http']);   /* [SFPC] 응답 코드를 함께 — 바쁜 것(503)과 죽은 것(0)을 가린다 */
       throw new RuntimeException('제출 실패: ' . $why);
     }
     foreach ($r['data'] as $one) {
@@ -113,7 +122,7 @@ function j0_fetch(array $tokens): array {
                             . implode(',', $chunk) . '&fields=' . $fields);
     if (!$r['ok'] || !isset($r['data']['submissions'])) {
       $why = $r['error'] ?: 'HTTP ' . $r['http'];
-      if (j0_retryable($r['http'])) throw new Judge0Busy($why);
+      if (j0_retryable($r['http'])) throw new Judge0Busy($why, $r['http']);
       throw new RuntimeException('결과 조회 실패: ' . $why);
     }
     foreach ($r['data']['submissions'] as $s) $out[] = $s;
