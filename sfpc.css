@@ -575,20 +575,25 @@ table.sfpc-pvlinks td a:hover{text-decoration:none; background:var(--b50)}
 /* 모니터링 — 제출 하나하나 (테스트케이스 칸) */
 .mon-subs{margin-bottom:6px}
 .mon-subtable td, .mon-subtable th{padding:5px 8px; font-size:13px; white-space:nowrap; vertical-align:middle}
-.mon-subtable td.who{max-width:150px; overflow:hidden; text-overflow:ellipsis}
-.mon-subtable td.prob{max-width:220px; overflow:hidden; text-overflow:ellipsis}
+.mon-subtable td.who{max-width:120px; overflow:hidden; text-overflow:ellipsis}
+.mon-subtable td.prob{max-width:150px; overflow:hidden; text-overflow:ellipsis}
+.mon-subtable td.srv{max-width:90px; overflow:hidden; text-overflow:ellipsis}
+.mon-subtable td, .mon-subtable th{padding-left:6px; padding-right:6px}
 .mon-subtable tr.j td{background:#F3F6FF} .mon-subtable tr.p td{background:#FAFAF7}
 .mon-subtable tr.sep td{background:#F1EFE8; font-size:12px; font-weight:600; color:var(--ink-3); padding:4px 8px}
 .mon-subtable tr.more td{text-align:center; color:var(--ink-3); font-size:12px}
 .mon-subtable td.warn{color:#B04A0A; font-weight:600} .mon-subtable td.bad{color:#C0392B; font-weight:700}
-.mon-strip{display:flex; flex-wrap:wrap; gap:2px; max-width:330px}
-.mon-strip i, .mon-legend i.c{display:inline-block; width:8px; height:14px; border-radius:2px; background:#E3E1D9}
+.mon-strip{display:flex; flex-wrap:nowrap; gap:1px; width:170px}
+.mon-strip i{flex:1 1 0; min-width:2px; max-width:8px; height:14px; border-radius:2px; background:#E3E1D9}
+.mon-legend i.c{display:inline-block; width:8px; height:14px; border-radius:2px; background:#E3E1D9}
 .mon-strip i.ok, .mon-legend i.ok, .mon-strip.bar b.ok{background:#1D9E75}
 .mon-strip i.bad, .mon-legend i.bad, .mon-strip.bar b.bad{background:#E24B4A}
 .mon-strip i.run, .mon-legend i.run, .mon-strip.bar b.run{background:#5B7FE8; animation:monRun 1s ease-in-out infinite alternate}
-.mon-strip.bar{display:flex; flex-wrap:nowrap; gap:0; width:330px; height:14px; background:#E3E1D9; border-radius:3px; overflow:hidden}
+.mon-strip.bar{display:flex; flex-wrap:nowrap; gap:0; width:170px; height:14px; background:#E3E1D9; border-radius:3px; overflow:hidden}
 .mon-strip.bar b{display:block; height:100%}
 .mon-legend{display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:4px 0 14px}
 .mon-legend span{display:inline-flex; align-items:center; gap:4px}
 @keyframes monRun{from{opacity:.45} to{opacity:1}}
 @media (prefers-reduced-motion: reduce){ .mon-strip i.run, .mon-strip.bar b.run{animation:none} }
+.mon-subtable td.act{text-align:right} .mon-subtable td.act .btn.small{padding:2px 8px; font-size:12px; line-height:1.5}
+.mon-subtable .btn.danger{color:#C0392B; border-color:#E8B4AE; background:#fff} .mon-subtable .btn.danger:hover{background:#FFF1EF}

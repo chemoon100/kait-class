@@ -21,6 +21,20 @@ require_once __DIR__ . '/../layout.php';
 require_once __DIR__ . '/../judge_pool.php';
 $me = need_admin('../');
 
+/* 제출 하나하나에 대한 동작 — 재채점 · 채점 취소 (화면의 단추가 부른다) */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['sub_act'])) {
+  header('Content-Type: application/json; charset=utf-8');
+  if (!sfpc_csrf_ok()) { echo json_encode(['ok' => false, 'msg' => '화면을 연 지 오래되었습니다. 새로 고친 뒤 다시 눌러 주세요.'], JSON_UNESCAPED_UNICODE); exit; }
+  $sid = (int)($_POST['id'] ?? 0); $act = (string)$_POST['sub_act'];
+  if ($act === 'rejudge') { $why = sfpc_judge_again($sid, $me); echo json_encode(['ok' => $why === '', 'msg' => $why === '' ? "#{$sid} 을 다시 채점합니다." : $why], JSON_UNESCAPED_UNICODE); exit; }
+  if ($act === 'cancel')  { $n = sfpc_judge_cancel([$sid], $me); echo json_encode(['ok' => $n > 0, 'msg' => $n ? "#{$sid} 의 채점을 취소했습니다." : '이미 채점이 끝난 제출입니다.'], JSON_UNESCAPED_UNICODE); exit; }
+  if ($act === 'cancel_user') {
+    $uid = (int)col("SELECT user_id FROM submissions WHERE id = ?", [$sid]);
+    $ids = $uid ? array_column(all("SELECT id FROM submissions WHERE user_id = ? AND state IN ('pending','judging')", [$uid]), 'id') : [];
+    $n = sfpc_judge_cancel($ids, $me); echo json_encode(['ok' => $n > 0, 'msg' => $n ? "대기 · 채점 중이던 제출 {$n}건을 취소했습니다." : '취소할 제출이 없습니다.'], JSON_UNESCAPED_UNICODE); exit;
+  }
+  echo json_encode(['ok' => false, 'msg' => '모르는 동작입니다.'], JSON_UNESCAPED_UNICODE); exit;
+}
 /* 부하 시험(sfpc-loadtest.php)이 남긴 진행 상황과 결과 */
 if (isset($_GET['loadtest'])) {
   header('Content-Type: application/json; charset=utf-8'); header('Cache-Control: no-store');
@@ -45,6 +59,7 @@ if (isset($_GET['json']) || isset($_GET['hist'])) {
     $cols = array_column(db()->query("PRAGMA table_info(submissions)")->fetchAll(PDO::FETCH_ASSOC), 'name');
     $x = in_array('judge_pos', $cols, true) ? 's.judge_pos, s.judge_srv, s.dispatched_at, s.judge_tries' : '0 AS judge_pos, NULL AS judge_srv, NULL AS dispatched_at, 0 AS judge_tries';
     $sel = "SELECT s.id, s.lang, s.state, s.verdict, s.passed_count, s.total_count, s.max_time, s.priority, s.tokens, s.judged_at, COALESCE(s.queued_at, s.created_at) AS q, $x,
+              (COALESCE(s.compile_msg, '') LIKE '" . SFPC_CANCEL_MARK . "%') AS canceled, (SELECT COUNT(*) FROM submissions w WHERE w.user_id = s.user_id AND w.state IN ('pending','judging')) AS mine,
               u.name AS uname, u.login_id, p.prob_no, p.title
             FROM submissions s JOIN users u ON u.id = s.user_id JOIN problems p ON p.id = s.problem_id";
     $names = []; foreach (pool_servers() as $k => $sv) $names[$k] = $sv['name'];
@@ -54,7 +69,7 @@ if (isset($_GET['json']) || isset($_GET['hist'])) {
       $run = 0; if ($r['state'] === 'judging' && (string)$r['tokens'] !== '') { $t = json_decode((string)$r['tokens'], true); $run = is_array($t) ? count($t) : 0; }
       $done = in_array($r['state'], ['done', 'error'], true);
       return ['id' => (int)$r['id'], 'who' => (string)($r['uname'] !== '' ? $r['uname'] : $r['login_id']), 'login' => (string)$r['login_id'], 'no' => (int)$r['prob_no'], 'title' => mb_substr((string)$r['title'], 0, 30),
-              'lang' => (string)$r['lang'], 'state' => (string)$r['state'], 'verdict' => $r['verdict'], 'rejudge' => (int)$r['priority'] > 0, 'tries' => (int)$r['judge_tries'],
+              'lang' => (string)$r['lang'], 'state' => (string)$r['state'], 'verdict' => $r['verdict'], 'rejudge' => (int)$r['priority'] > 0, 'tries' => (int)$r['judge_tries'], 'canceled' => (int)$r['canceled'] === 1, 'mine' => (int)$r['mine'],
               'pass' => $done ? (int)$r['passed_count'] : (int)$r['judge_pos'], 'run' => $run, 'total' => (int)$r['total_count'],
               'wait' => max(0, ($done && $j ? $j : $now) - $q), 'judge' => $done && $j && $d ? max(0, $j - $d) : null, 'time' => $r['max_time'] !== null ? round((float)$r['max_time'], 2) : null,
               'srv' => $r['judge_srv'] !== null && $r['judge_srv'] !== '' ? ($names[(string)$r['judge_srv']] ?? '?') : '', 'at' => $done && $j ? date('H:i:s', $j) : date('H:i:s', $q)];
@@ -132,8 +147,10 @@ sfpc_css('../');
   <h2>채점 <span>제출이 밀리지 않고 처리되는지</span></h2>
   <div class="mon-grid" id="gJudge"></div>
   <h2>제출 하나하나 <span>지금 채점 중인 것 · 기다리는 것 · 방금 끝난 것. 칸 하나가 테스트케이스 하나입니다</span></h2>
+  <div class="note ok" id="monSubNote" hidden></div>
   <div class="mon-subs" id="gSubs"></div>
   <div class="mon-legend small muted"><span><i class="c ok"></i>통과</span><span><i class="c run"></i>채점 중</span><span><i class="c bad"></i>여기서 틀려 멈춤</span><span><i class="c"></i>돌리지 않음</span>
+    · <b>취소</b>: 대기 · 채점 중인 제출을 멈춥니다. 순위에 들어가지 않고(바깥 스코어보드에는 CE), 학생에게 다시 제출하라는 안내가 보입니다 · <b>재채점</b>: 끝난 제출 하나를 다시 채점합니다
     · 틀리면 거기서 멈추므로 뒤쪽 칸은 비어 있습니다 · 칸은 조각(3 · 6 · 12 · 20개) 단위로 채워집니다</div>
   <h2>채점 서버 <span>Judge0 마다 살아 있는지, 얼마나 맡겨 두었는지</span></h2>
   <div class="mon-grid" id="gPool"></div>
@@ -217,6 +234,7 @@ sfpc_css('../');
       var V = { AC: '맞았습니다', WA: '틀렸습니다', TLE: '시간 초과', MLE: '메모리 초과', RE: '런타임 오류', CE: '컴파일 오류', IE: '채점 오류' };
       var strip = function (x) {
         var n = x.total, done = x.state === 'done' || x.state === 'error', failAt = done && x.verdict !== 'AC' && x.verdict !== 'CE' && x.verdict !== 'IE' ? x.pass : -1;
+        if (done && x.canceled) return '<span class="muted small">채점하지 않음</span>';
         if (!n) return '<span class="muted small">' + (done && x.verdict === 'CE' ? '컴파일에서 멈춤' : '–') + '</span>';
         if (n > 60) {      /* 케이스가 아주 많으면 칸 대신 막대 */
           var a = 100 * x.pass / n, r = 100 * x.run / n;
@@ -229,19 +247,22 @@ sfpc_css('../');
       var row = function (x, kind) {
         var st = kind === 'p' ? '<span class="v v-wait">대기</span>' : (kind === 'j' ? '<span class="v v-open">채점 중</span>' : '<span class="v v-' + esc(x.verdict || 'IE') + '" title="' + (V[x.verdict] || '') + '">' + esc(x.verdict || '?') + '</span>');
         var wl = kind === 'r' ? '' : (x.wait >= 120 ? ' bad' : (x.wait >= 30 ? ' warn' : ''));
+        var act = kind === 'r' ? '<button class="btn small" data-sub="rejudge" data-id="' + x.id + '" data-who="' + esc(x.who) + '">재채점</button>'
+                : '<button class="btn small danger" data-sub="cancel" data-id="' + x.id + '" data-who="' + esc(x.who) + '">취소</button>' + (x.mine > 1 ? ' <button class="btn small danger" data-sub="cancel_user" data-id="' + x.id + '" data-who="' + esc(x.who) + '" data-n="' + x.mine + '" title="이 팀 · 사용자의 대기 · 채점 중인 제출을 모두 취소">이 팀 ' + x.mine + '건</button>' : '');
+        if (kind === 'r' && x.canceled) st = '<span class="v v-wait" title="운영진이 채점을 취소한 제출. 바깥에는 CE 로 나갑니다">취소됨</span>';
         return '<tr class="' + kind + '"><td class="num"><a href="../results.php?id=' + x.id + '">' + x.id + '</a></td><td>' + st + (x.rejudge ? ' <span class="small muted">재채점</span>' : '') + (x.tries > 1 ? ' <span class="small muted" title="다른 채점 서버로 옮겨진 횟수">×' + x.tries + '</span>' : '') + '</td>'
           + '<td class="who" title="' + esc(x.login) + '">' + esc(x.who) + '</td><td class="prob" title="' + esc(x.title) + '">' + x.no + ' <span class="muted">' + esc(x.title) + '</span></td><td>' + esc(x.lang) + '</td>'
           + '<td>' + strip(x) + '</td><td class="num">' + (x.total ? x.pass + ' / ' + x.total : '') + '</td>'
-          + '<td class="num' + wl + '">' + fmtSec(x.wait) + '</td><td class="num">' + (x.time !== null && kind === 'r' ? x.time.toFixed(2) + '초' : '') + '</td><td>' + esc(x.srv) + '</td><td class="num muted">' + x.at + '</td></tr>';
+          + '<td class="num' + wl + '">' + fmtSec(x.wait) + '</td><td class="num">' + (x.time !== null && kind === 'r' ? x.time.toFixed(2) + '초' : '') + '</td><td class="srv" title="' + esc(x.srv) + '">' + esc(x.srv) + '</td><td class="num muted">' + x.at + '</td><td class="act">' + act + '</td></tr>';
       };
       var s = d.subs, t = '';
       s.judging.forEach(function (x) { t += row(x, 'j'); });
       s.pending.forEach(function (x) { t += row(x, 'p'); });
-      if (s.pending_total > s.pending.length) t += '<tr class="more"><td colspan="11">… 기다리는 제출이 ' + (s.pending_total - s.pending.length) + '건 더 있습니다</td></tr>';
-      if (!s.judging.length && !s.pending_total) t += '<tr class="more"><td colspan="11">지금 채점 중이거나 기다리는 제출이 없습니다</td></tr>';
-      if (s.recent.length) t += '<tr class="sep"><td colspan="11">방금 끝난 제출</td></tr>';
+      if (s.pending_total > s.pending.length) t += '<tr class="more"><td colspan="12">… 기다리는 제출이 ' + (s.pending_total - s.pending.length) + '건 더 있습니다</td></tr>';
+      if (!s.judging.length && !s.pending_total) t += '<tr class="more"><td colspan="12">지금 채점 중이거나 기다리는 제출이 없습니다</td></tr>';
+      if (s.recent.length) t += '<tr class="sep"><td colspan="12">방금 끝난 제출</td></tr>';
       s.recent.forEach(function (x) { t += row(x, 'r'); });
-      $('gSubs').innerHTML = '<div class="tablewrap"><table class="list mon-subtable"><thead><tr><th class="num">번호</th><th>상태</th><th>팀 · 사용자</th><th>문제</th><th>언어</th><th>테스트케이스</th><th class="num">통과</th><th class="num">기다린 시간</th><th class="num">실행</th><th>채점 서버</th><th class="num">시각</th></tr></thead><tbody>' + t + '</tbody></table></div>';
+      $('gSubs').innerHTML = '<div class="tablewrap"><table class="list mon-subtable"><thead><tr><th class="num">번호</th><th>상태</th><th>팀 · 사용자</th><th>문제</th><th>언어</th><th>테스트케이스</th><th class="num">통과</th><th class="num">기다린 시간</th><th class="num">실행</th><th>채점 서버</th><th class="num">시각</th><th></th></tr></thead><tbody>' + t + '</tbody></table></div>';
     }
 
     /* ── 채점 서버 ── */
@@ -298,6 +319,20 @@ sfpc_css('../');
     if (cpu !== null) { live.push({ t: d.now, cpu: +cpu.toFixed(1), mem: p.mem ? +(100 * (1 - p.mem.avail / p.mem.total)).toFixed(1) : null, pending: j.pending, judging: j.judging, wait: j.wait_avg, ms: r.avg, users: r.users, req: r.n, sub: j.sub_1m, done: j.done_1m, load: load }); if (live.length > 40) live.shift(); }
     prev = d; charts();
   }
+  /* 제출 하나하나의 단추 — 재채점 · 취소 */
+  $('gSubs').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-sub]'); if (!b) return;
+    var act = b.getAttribute('data-sub'), id = b.getAttribute('data-id'), who = b.getAttribute('data-who');
+    var q = act === 'rejudge' ? '#' + id + ' (' + who + ') 을 다시 채점할까요?\n새 판정이 나면 순위와 바깥 스코어보드에 반영됩니다.'
+          : act === 'cancel' ? '#' + id + ' (' + who + ') 의 채점을 취소할까요?\n순위에는 반영되지 않고, 학생에게는 "운영진이 채점을 취소했습니다. 다시 제출해 주세요"가 보입니다.'
+          : who + ' 의 대기 · 채점 중인 제출 ' + b.getAttribute('data-n') + '건을 모두 취소할까요?\n순위에는 반영되지 않습니다.';
+    if (!window.confirm(q)) return;
+    b.disabled = true;
+    var fd = new FormData(); fd.append('csrf', <?= json_encode(sfpc_csrf()) ?>); fd.append('sub_act', act); fd.append('id', id);
+    fetch('sfpc_monitor.php', { method: 'POST', body: fd, credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) {
+      var n = $('monSubNote'); n.textContent = j.msg; n.className = 'note ' + (j.ok ? 'ok' : 'err'); n.hidden = false; setTimeout(function () { n.hidden = true; }, 6000); tick();
+    }).catch(function () { b.disabled = false; });
+  });
   function beep() { try { var a = new (window.AudioContext || window.webkitAudioContext)(), o = a.createOscillator(), g = a.createGain(); o.frequency.value = 880; o.connect(g); g.connect(a.destination); g.gain.value = .15; o.start(); setTimeout(function () { o.frequency.value = 660; }, 180); setTimeout(function () { o.stop(); a.close(); }, 400); } catch (e) {} }
 
   /* 지난 기록 그래프 — 1분마다의 점 뒤에 방금의 값을 잇는다 */

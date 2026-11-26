@@ -1106,6 +1106,41 @@ function sfpc_arena_bar(?array $u, string $nav, string $root): bool {
 function sfpc_verdict_label(string $v): string { return (VERDICT_NAME[$v] ?? $v) . ' (' . $v . ')'; }
 const SFPC_REJUDGE_SCOPE = ['all' => '모든 제출', 'wrong' => '틀린 제출만 (정답 빼고)', 'ie' => '채점 오류만 (IE)'];
 /* 묶음을 만든다. 만든 묶음의 번호를 돌려준다 (조건에 맞는 제출이 없으면 0). */
+/* ── 운영진이 채점을 취소한 제출 ──
+   대기 중이거나 채점 중인 제출을 멈춘다. 판정은 컴파일 오류(CE)로 둔다 — 순위와 벌점에 들어가지 않고,
+   바깥 스코어보드에도 문서에 있는 여섯 판정 가운데 하나로 나간다 ("채점 중"으로 남으면 스코어보드가 대회를 끝내지 못한다).
+   학생에게는 컴파일 메시지 자리에 아래 글이 보인다. 다시 채점하려면 그 제출을 재채점한다. */
+const SFPC_CANCEL_MARK = '[채점 취소]';
+const SFPC_CANCEL_MSG  = SFPC_CANCEL_MARK . ' 운영진이 이 제출의 채점을 취소했습니다. 순위와 벌점에는 반영되지 않습니다. 다시 제출해 주세요.';
+/* @return int 취소한 제출 수. $ids 는 제출 번호들 — 그중 대기 · 채점 중인 것만 취소된다. */
+function sfpc_judge_cancel(array $ids, array $actor): int {
+  $ids = array_values(array_unique(array_filter(array_map('intval', $ids)))); if (!$ids) return 0;
+  $in = implode(',', $ids);
+  $rows = all("SELECT s.id, u.login_id, p.prob_no FROM submissions s JOIN users u ON u.id = s.user_id JOIN problems p ON p.id = s.problem_id WHERE s.id IN ($in) AND s.state IN ('pending','judging')");
+  if (!$rows) return 0;
+  $st = db()->prepare("UPDATE submissions SET state='done', verdict='CE', passed_count=0, tokens=NULL, compile_msg=?, fail_seq=NULL,
+                       fail_input=NULL, fail_expected=NULL, fail_output=NULL, max_time=NULL, max_memory=NULL, judged_at=? WHERE id=? AND state IN ('pending','judging')");
+  $n = 0; $done = [];
+  foreach ($rows as $r) { $st->execute([SFPC_CANCEL_MSG, now(), $r['id']]); if ($st->rowCount()) { $n++; $done[] = '#' . $r['id'] . ' ' . $r['login_id'] . ' · ' . $r['prob_no']; } }
+  if ($n) sfpc_log(null, null, $actor, 'admin', '채점 취소 ' . $n . '건 (' . mb_substr(implode(', ', $done), 0, 400) . ')');
+  return $n;
+}
+/* 끝난 제출 하나를 다시 채점한다 (운영 > 채점의 재채점과 같은 방식 — 새 제출이 먼저 처리된다).
+   바깥 스코어보드에는 새 판정이 난 뒤에 새 줄이 더해지고 옛 줄이 valid=false 가 된다 (sfpc_judgements_sync).
+   @return string '' 이면 성공, 아니면 안 된 까닭 */
+function sfpc_judge_again(int $sid, array $actor): string {
+  $r = one("SELECT s.id, s.state, s.verdict, u.login_id, p.prob_no FROM submissions s JOIN users u ON u.id = s.user_id JOIN problems p ON p.id = s.problem_id WHERE s.id = ?", [$sid]);
+  if (!$r) return '없는 제출입니다.';
+  if (!in_array($r['state'], ['done', 'error'], true)) return '아직 채점이 끝나지 않은 제출입니다.';
+  if ((int)col("SELECT COUNT(*) FROM sfpc_rejudge_item WHERE submission_id = ? AND open = 1", [$sid])) return '재채점 묶음에 들어 있는 제출입니다. 재채점 화면에서 적용하거나 취소해 주세요.';
+  db()->prepare("UPDATE submissions SET state='pending', priority=1, queued_at=?, verdict=NULL, passed_count=NULL, total_count=NULL,
+                 max_time=NULL, max_memory=NULL, compile_msg=NULL, fail_seq=NULL, tokens=NULL, judged_at=NULL,
+                 fail_input=NULL, fail_expected=NULL, fail_output=NULL WHERE id=? AND state IN ('done','error')")->execute([now(), $sid]);
+  /* 채점 목록(바깥 스코어보드)이 "새 판정이 났다"는 것을 판정 시각으로 알아본다. 취소하자마자 재채점해 같은 초에 끝나도 놓치지 않게 표시해 둔다. */
+  db()->prepare("UPDATE sfpc_judgements SET src_judged_at = '' WHERE submission_id = ? AND valid = 1")->execute([$sid]);
+  sfpc_log(null, null, $actor, 'admin', '제출 한 건 재채점 (#' . $sid . ' ' . $r['login_id'] . ' · ' . $r['prob_no'] . ' · 예전 판정 ' . ($r['verdict'] ?? '-') . ')');
+  return '';
+}
 function sfpc_rejudge_start(int $setId, int $problemId, int $userId, string $scope, bool $auto, int $byUser): int {
   $w = ["s.set_id = ?", "s.state IN ('done','error')", "NOT EXISTS (SELECT 1 FROM sfpc_rejudge_item x WHERE x.submission_id = s.id AND x.open = 1)"]; $a = [$setId];
   if ($problemId) { $w[] = "s.problem_id = ?"; $a[] = $problemId; }

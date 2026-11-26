@@ -170,7 +170,8 @@ function post_chunk(int $sid, array $sub, int $pos): array {
   $part = array_slice($cases, $pos, chunk_len($pos, count($cases)));
   if (!$part) throw new RuntimeException('넘길 테스트케이스가 없습니다');
   $tokens = j0_submit((string)$sub['source_code'], (string)$sub['lang'], $part, (float)$p['time_limit'], (int)$p['memory_limit']);
-  db()->prepare("UPDATE submissions SET tokens=?, total_count=?, judge_pos=?, dispatched_at=? WHERE id=?")
+  /* [SFPC] 그사이 운영진이 취소했으면(state 가 judging 이 아니다) 덮어쓰지 않는다 */
+  db()->prepare("UPDATE submissions SET tokens=?, total_count=?, judge_pos=?, dispatched_at=? WHERE id=? AND state='judging'")
       ->execute([json_encode($tokens), count($cases), $pos, now(), $sid]);
   return [count($part), count($cases)];
 }
@@ -211,7 +212,7 @@ function requeue(int $sid, string $why): void {
     fail_submission($sid, $why . ' (' . STALE_MIN . '분 넘게 재시도)');
     return;
   }
-  db()->prepare("UPDATE submissions SET state='pending', tokens=NULL WHERE id=?")->execute([$sid]);
+  db()->prepare("UPDATE submissions SET state='pending', tokens=NULL WHERE id=? AND state='judging'")->execute([$sid]);
   log_busy($why);
 }
 
@@ -271,7 +272,7 @@ function collect(): bool {
     $ev['maxMem']  = max($ev['maxMem'],  (int)($r['max_memory'] ?? 0));
     $worked = true;
     if ($ev['verdict'] === null && $ev['passed'] < count($cases)) {
-      db()->prepare("UPDATE submissions SET tokens='', judge_pos=?, passed_count=?, max_time=?, max_memory=? WHERE id=?")
+      db()->prepare("UPDATE submissions SET tokens='', judge_pos=?, passed_count=?, max_time=?, max_memory=? WHERE id=? AND state='judging'")
           ->execute([$ev['passed'], $ev['passed'], $ev['maxTime'], $ev['maxMem'], $sid]);
       continue;                                   /* continue_chunks 가 이어서 넘긴다 */
     }
@@ -345,7 +346,7 @@ function finish_submission(int $sid, array $ev, int $total): void {
   $verdict = $ev['verdict'] ?? 'AC';
   db()->prepare("UPDATE submissions SET state='done', verdict=?, passed_count=?,
                  total_count=?, max_time=?, max_memory=?, compile_msg=?, fail_seq=?,
-                 fail_input=?, fail_expected=?, fail_output=?, judged_at=? WHERE id=?")
+                 fail_input=?, fail_expected=?, fail_output=?, judged_at=? WHERE id=? AND state='judging'")
       ->execute([$verdict, $ev['passed'], $total, $ev['maxTime'], $ev['maxMem'],
                  mb_substr((string)$ev['compile'], 0, 4000), $ev['failSeq'],
                  $ev['fIn'], $ev['fExp'], $ev['fGot'], now(), $sid]);
@@ -357,7 +358,7 @@ function finish_submission(int $sid, array $ev, int $total): void {
 /* 채점 자체가 실패한 경우 */
 function fail_submission(int $sid, string $why): void {
   db()->prepare("UPDATE submissions SET state='error', verdict='IE', compile_msg=?,
-                 judged_at=? WHERE id=?")
+                 judged_at=? WHERE id=? AND state IN ('pending','judging')")
       ->execute([mb_substr($why, 0, 1000), now(), $sid]);
   wlog("#{$sid} → 채점 오류: {$why}");
 }
