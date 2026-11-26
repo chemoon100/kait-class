@@ -21,6 +21,17 @@ require_once __DIR__ . '/../layout.php';
 require_once __DIR__ . '/../judge_pool.php';
 $me = need_admin('../');
 
+/* 부하 시험(sfpc-loadtest.php)이 남긴 진행 상황과 결과 */
+if (isset($_GET['loadtest'])) {
+  header('Content-Type: application/json; charset=utf-8'); header('Cache-Control: no-store');
+  $dir = DATA_DIR . '/loadtest'; $runs = [];
+  foreach (array_slice(array_reverse(glob($dir . '/2*.json') ?: []), 0, 30) as $f) {
+    $r = json_decode((string)@file_get_contents($f), true); if (!is_array($r)) continue;
+    if (empty($_GET['series'])) unset($r['series']);
+    $runs[] = $r;
+  }
+  echo json_encode(['progress' => json_decode((string)@file_get_contents($dir . '/progress.json'), true), 'runs' => $runs], JSON_UNESCAPED_UNICODE); exit;
+}
 if (isset($_GET['json']) || isset($_GET['hist'])) {
   header('Content-Type: application/json; charset=utf-8'); header('Cache-Control: no-store');
   if (isset($_GET['hist'])) {
