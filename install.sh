@@ -380,6 +380,14 @@ step_judge0() {
       echo "$k 기존 값 유지"
     fi
   done
+  # [SFPC] 대기열 크기. 기본 100칸은 테스트케이스 20개짜리 제출 다섯 건이면 찬다. 차면 Judge0 가 503 으로 거절하고,
+  #   같은 제출을 다시 밀어 넣는 동안 앞서 받아 준 조각만 헛돌아 채점이 멈춘다 (2026-11-26 부하 시험에서 확인).
+  #   얼마나 맡길지는 채점 워커가 조절하므로 여기서는 넉넉히 둔다. 채점 전용 서버(sfpc-judge-install.sh)와 같은 값.
+  if grep -qE '^MAX_QUEUE_SIZE=' judge0.conf; then
+    sed -i -E 's/^MAX_QUEUE_SIZE=.*$/MAX_QUEUE_SIZE=10000/' judge0.conf
+  else
+    echo 'MAX_QUEUE_SIZE=10000' >> judge0.conf
+  fi
   # ★ 600 으로 막으면 안 된다. server·workers 컨테이너는 안에서 root 가 아닌
   #   judge0 사용자로 이 파일을 직접 읽는다. 못 읽으면 DB 비밀번호를 몰라 계속 죽는다.
   #   (db·redis 는 docker 가 root 로 읽어 넘겨주므로 600 이어도 떠서 원인이 가려진다)
