@@ -76,6 +76,10 @@ function j0_submit(string $sourceCode, string $langKey, array $cases,
   }
   $langId = (int)$L['id'];
 
+  /* [SFPC] 언어별 시간 배수 · 출력 크기 · 스택 (judge_pool.php 의 judge_tune — 정하지 않았으면 예전 그대로) */
+  $cpuLimit = judge_tune_cpu($langKey, $cpuLimit);
+  $tune = judge_tune_conf();
+
   $tokens = [];
   foreach (array_chunk($cases, J0_BATCH) as $chunk) {
     $subs = [];
@@ -88,6 +92,8 @@ function j0_submit(string $sourceCode, string $langKey, array $cases,
         'wall_time_limit' => min(20.0, $cpuLimit + 3.0),  /* 입력 대기로 멈추는 경우 대비 */
         'memory_limit'    => $memLimit,
       ];
+      if ($tune['file_kb'] > 0)  $subs[count($subs) - 1]['max_file_size'] = $tune['file_kb'];     /* [SFPC] */
+      if ($tune['stack_kb'] > 0) $subs[count($subs) - 1]['stack_limit']   = $tune['stack_kb'];    /* [SFPC] */
       if (($L['opts'] ?? '') !== '') {
         $subs[count($subs) - 1]['compiler_options'] = $L['opts'];
       }

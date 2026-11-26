@@ -48,6 +48,32 @@ function pool_servers(bool $fresh = false): array {
 }
 function pool_multi(): bool { return !isset(pool_servers()['default']); }
 
+/* ── 채점 설정: 언어별 시간 · 출력 크기 · 스택 ──
+   설정 judge_tune (JSON): {"time": {"py": [배수, 더하기(초)]}, "file_kb": 출력 상한, "stack_kb": 스택 상한}
+   아무것도 정하지 않으면 예전과 똑같다 (시간은 문제의 제한 시간 그대로, 출력 · 스택은 Judge0 기본값 1MB · 64MB).
+   · 시간: 파이썬처럼 느린 언어에 "제한 시간 × 배수 + 더하기"를 준다. Judge0 가 받는 최대는 15초라 그보다 크면 15초로 자른다.
+   · 출력: Judge0 기본은 1MB — 넘으면 맞는 풀이도 런타임 오류가 된다. 4096KB 까지 올릴 수 있다 (그 이상은 채점 서버 설정을 바꿔야 한다).
+   · 스택: Judge0 기본은 64MB — 깊은 재귀가 죽는다. 128000KB 까지. */
+const TUNE_MAX_CPU = 15.0;
+function judge_tune_conf(bool $fresh = false): array {
+  static $memo = null, $at = 0;
+  if (!$fresh && $memo !== null && time() - $at < 5) return $memo;
+  $at = time();
+  $j = json_decode((string)(one("SELECT value FROM settings WHERE key = 'judge_tune'")['value'] ?? ''), true);
+  $out = ['time' => [], 'file_kb' => 0, 'stack_kb' => 0];
+  if (is_array($j)) {
+    foreach ((array)($j['time'] ?? []) as $k => $v) { $m = max(1.0, min(10.0, (float)($v[0] ?? 1))); $pl = max(0.0, min(10.0, (float)($v[1] ?? 0))); if ($m > 1.0 || $pl > 0.0) $out['time'][(string)$k] = [$m, $pl]; }
+    $f = (int)($j['file_kb'] ?? 0);  $out['file_kb']  = $f > 0 ? max(1024, min(4096, $f)) : 0;
+    $st = (int)($j['stack_kb'] ?? 0); $out['stack_kb'] = $st > 0 ? max(64000, min(128000, $st)) : 0;
+  }
+  return $memo = $out;
+}
+/* 그 언어로 낸 제출의 실제 CPU 제한(초) */
+function judge_tune_cpu(string $lang, float $cpu): float {
+  $t = judge_tune_conf()['time'][$lang] ?? null;
+  return $t ? min(TUNE_MAX_CPU, round($cpu * $t[0] + $t[1], 2)) : $cpu;
+}
+
 /* j0_request 가 쓸 서버를 정한다 (null 이면 judge0_url) */
 function pool_use(?array $srv): void { $GLOBALS['J0_SERVER'] = $srv; }
 

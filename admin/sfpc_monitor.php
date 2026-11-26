@@ -94,6 +94,23 @@ if (isset($_GET['json']) || isset($_GET['hist'])) {
   exit;
 }
 
+/* ── 채점 설정 (언어별 시간 · 출력 · 스택) ── */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['tune_save'])) {
+  if (!sfpc_csrf_ok()) redirect_with('', '화면을 연 지 오래되었습니다. 다시 저장해 주세요.');
+  $time = [];
+  foreach ((array)($_POST['mult'] ?? []) as $k => $m) {
+    if (!isset(langs(false)[(string)$k])) continue;
+    $m = max(1.0, min(10.0, (float)$m ?: 1.0)); $pl = max(0.0, min(10.0, (float)($_POST['plus'][$k] ?? 0)));
+    if ($m > 1.0 || $pl > 0.0) $time[(string)$k] = [$m, $pl];
+  }
+  $f = (int)($_POST['file_kb'] ?? 0); $st = (int)($_POST['stack_kb'] ?? 0);
+  $conf = ['time' => $time, 'file_kb' => $f > 0 ? max(1024, min(4096, $f)) : 0, 'stack_kb' => $st > 0 ? max(64000, min(128000, $st)) : 0];
+  setting_set('judge_tune', ($time || $conf['file_kb'] || $conf['stack_kb']) ? json_encode($conf) : '');
+  sfpc_log(null, null, $me, 'admin', '채점 설정을 바꿈 (시간 ' . ($time ? implode(', ', array_map(fn($k, $v) => $k . ' ×' . $v[0] . ' +' . $v[1] . '초', array_keys($time), $time)) : '그대로') . ' · 출력 ' . ($conf['file_kb'] ?: '기본') . ' · 스택 ' . ($conf['stack_kb'] ?: '기본') . ')');
+  redirect_with('채점 설정을 저장했습니다. 채점 일꾼이 5초 안에 새 값을 씁니다. 이미 채점이 끝난 제출은 바뀌지 않습니다 (필요하면 재채점).');
+}
+$tune = judge_tune_conf(true);
+
 /* ── 채점 서버 등록 ── */
 $raw = json_decode(setting('judge_servers'), true); $saved = is_array($raw) ? $raw : [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -162,6 +179,30 @@ sfpc_css('../');
   <h2>지난 기록 <span>1분마다 한 점. 부하 시험을 걸었을 때 어느 순간부터 무너지는지 봅니다</span>
     <select id="monSpan" style="margin-left:10px; width:auto; display:inline-block; font-size:12px"><option value="3600">1시간</option><option value="10800">3시간</option><option value="43200">12시간</option><option value="86400">하루</option></select></h2>
   <div class="mon-charts" id="monCharts"></div>
+
+  <h2>채점 설정 <span>언어마다 시간을 더 줄지, 출력과 스택을 얼마까지 받을지. 비워 두면 예전과 같습니다</span></h2>
+  <form method="post" class="mon-tune">
+    <?= sfpc_csrf_field() ?><input type="hidden" name="tune_save" value="1">
+    <div class="tablewrap"><table class="list">
+      <thead><tr><th>언어</th><th class="num">시간 배수</th><th class="num">더하기 (초)</th><th>제한 시간 2초인 문제라면</th><th>컴파일 옵션 <span class="small muted">(운영 &gt; 언어에서 바꿉니다)</span></th></tr></thead><tbody>
+      <?php foreach (langs(false) as $k => $L): $t = $tune['time'][$k] ?? [1, 0]; ?>
+        <tr<?= $L['active'] ? '' : ' class="muted"' ?>><td><b><?= h($L['label']) ?></b> <span class="small muted"><?= h($k) ?><?= $L['active'] ? '' : ' · 꺼짐' ?></span></td>
+          <td class="num"><input type="number" name="mult[<?= h($k) ?>]" min="1" max="10" step="0.5" value="<?= h((string)(float)$t[0]) ?>" style="width:80px"></td>
+          <td class="num"><input type="number" name="plus[<?= h($k) ?>]" min="0" max="10" step="0.5" value="<?= h((string)(float)$t[1]) ?>" style="width:80px"></td>
+          <td><?= rtrim(rtrim(number_format(judge_tune_cpu($k, 2.0), 2), '0'), '.') ?>초</td>
+          <td><code><?= h($L['opts'] !== '' ? $L['opts'] : '(없음)') ?></code></td></tr>
+      <?php endforeach; ?></tbody></table></div>
+    <div class="row" style="margin-top:10px; gap:18px; flex-wrap:wrap">
+      <label class="small">출력 크기 상한 (KB) <input type="number" name="file_kb" min="0" max="4096" step="1" value="<?= (int)$tune['file_kb'] ?: '' ?>" placeholder="기본 1024" style="width:120px"></label>
+      <label class="small">스택 상한 (KB) <input type="number" name="stack_kb" min="0" max="128000" step="1000" value="<?= (int)$tune['stack_kb'] ?: '' ?>" placeholder="기본 64000" style="width:120px"></label>
+      <button class="btn primary">저장</button>
+    </div>
+    <ul class="small muted" style="margin:10px 0 0; padding-left:18px; line-height:1.8">
+      <li>실제 제한 시간 = 문제의 제한 시간 × 배수 + 더하기. 채점 엔진이 받는 최대가 15초라 그보다 크면 15초가 됩니다. 문제 화면에는 문제의 제한 시간만 보이므로, 배수를 주면 학생들에게 따로 알려 주세요.</li>
+      <li>출력 크기: 기본 1MB 를 넘으면 맞는 풀이도 런타임 오류가 됩니다. 4096KB 까지 올릴 수 있습니다. 스택: 기본 64MB, 깊은 재귀가 있는 문제면 128000KB 까지 올립니다.</li>
+      <li>직접 실행(코드 돌려 보기)에도 같은 값이 적용됩니다. 바꾼 뒤에는 정답 풀이를 한 번씩 내 보고 확인하세요.</li>
+    </ul>
+  </form>
 
   <h2>채점 서버 등록 <span>주 서버는 동시에 나눠 쓰고, 예비는 주 서버가 모두 죽었을 때만 씁니다</span></h2>
   <form method="post" class="mon-servers">
