@@ -70,7 +70,7 @@ page_head(['title' => '로그인', 'root' => '', 'user' => null, 'nav' => '']);
     <p class="small muted" style="margin:16px 0 0; text-align:center">
       <?php if (function_exists('sfpc_site') && sfpc_site()): /* [SFPC] 지도교사는 메일로 스스로 다시 정한다 */ ?>
         팀 계정의 비밀번호는 지도교사 선생님이 정합니다.<br>
-        지도교사 선생님은 <a href="sfpc_reset.php">아이디 · 비밀번호 찾기</a>
+        <a href="sfpc_reset.php">지도교사 아이디 · 비밀번호 찾기</a>
       <?php else: ?>
         아이디는 학교에서 받은 것을 씁니다. 비밀번호를 잊었으면 선생님께 말씀하세요.
       <?php endif; ?>
