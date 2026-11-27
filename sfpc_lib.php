@@ -26,7 +26,7 @@ if (PHP_SAPI !== 'cli' && !defined('SFPC_REQ_LOGGED')) {
 }
 
 /* 표 구조를 바꿀 때마다 1씩 올린다 */
-const SFPC_SCHEMA = 13;
+const SFPC_SCHEMA = 14;
 
 /* 올해 대회. 내년에는 이 값과 설정만 바꾸면 접수를 새로 받을 수 있다. */
 const SFPC_CONTEST = '2026';
@@ -74,7 +74,7 @@ const SFPC_DEFAULTS = [
   'sfpc_apply_to'     => '2027-01-01 23:59',
   'sfpc_schedule'     => '',                     // 첫 화면에 보일 대회 일정 (마크다운)
   'sfpc_privacy'      => '',                     // 개인정보 수집·이용 안내 (마크다운). 비면 기본 문구
-  'sfpc_contact'      => 'kaiteachers2013@gmail.com',
+  'sfpc_contact'      => 'sfpcadmin@gmail.com',
   'sfpc_site'         => '1',                    // 이 사이트 전체가 SFPC 사이트다 — 위쪽 메뉴를 접수 · 공부하기 · 준비하기 · 도전하기 · 스코어보드로 바꾸고,
                                                  //   KAIT-CLASS 의 기존 메뉴(문제 모음 · 채점 결과 · 수업 · 평가)는 운영진에게만 보인다
   'sfpc_study_open'   => '1',
@@ -206,6 +206,8 @@ function sfpc_schools_load_bundled(): int {
   });
 }
 
+require_once __DIR__ . '/sfpc_mail.php';   /* 메일 보내기 · 지도교사 이메일 인증 */
+
 /* 요청마다 CREATE TABLE 을 돌리지 않게, 설정에 적어 둔 버전과 다를 때만 */
 if ((int)sfpc_setting('sfpc_schema') !== SFPC_SCHEMA) {
   sfpc_ensure_schema(db());
@@ -314,6 +316,8 @@ if ((int)sfpc_setting('sfpc_schema') !== SFPC_SCHEMA) {
     valid INTEGER NOT NULL DEFAULT 1, end_at TEXT NOT NULL, src_judged_at TEXT NOT NULL DEFAULT '')");
   db()->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_sfpc_jud_valid ON sfpc_judgements(submission_id) WHERE valid = 1");
   db()->exec("CREATE INDEX IF NOT EXISTS idx_sfpc_jud_round ON sfpc_judgements(round_id, id)");
+  /* 14 — 지도교사 이메일 인증 (sfpc_mail.php). 인증한 주소 · 인증번호 · 보낸 메일 기록. */
+  sfpc_mail_schema();
   /* 학교 목록이 비어 있으면 함께 넣어 둔 목록으로 채운다 — 설치만 하면 학교 찾기가 바로 된다 */
   if ((int)db()->query("SELECT COUNT(*) FROM sfpc_schools")->fetchColumn() === 0 && sfpc_schools_load_bundled() > 0) {
     setting_set('sfpc_schools_at', now());

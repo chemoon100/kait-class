@@ -270,12 +270,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($pw !== '' && strlen($pw) < 8) redirect_with('', '새 비밀번호는 8자 이상이어야 합니다.');
     if ($pw !== '' && $c['role'] === 'admin') redirect_with('', '운영진 계정의 비밀번호는 여기서 바꾸지 않습니다.');
     db()->prepare("UPDATE sfpc_coaches SET name = ?, phone = ?, email = ? WHERE user_id = ?")->execute([$name, $phone, $email, $uid]);
+    /* 운영진이 전화 등으로 주소를 직접 확인했을 때 — 인증 메일이 닿지 않는 선생님을 위해 */
+    /* 주소를 바꾸면 인증은 풀린다 (체크가 그대로 따라온 것은 새 주소를 확인했다는 뜻이 아니다) */
+    $wasV = sfpc_verified($c); $same = strcasecmp($c['email'], $email) === 0;
+    $nowV = !empty($_POST['verified']) && $email !== '' && ($same || !$wasV);
+    if (isset($_POST['verified_shown'])) {
+      if ($nowV && !($wasV && $same)) db()->prepare("UPDATE sfpc_coaches SET verified_email = email, verified_at = ? WHERE user_id = ?")->execute([now(), $uid]);
+      elseif (!$nowV && $wasV)         db()->prepare("UPDATE sfpc_coaches SET verified_email = '', verified_at = '' WHERE user_id = ?")->execute([$uid]);
+    }
     if ($pw !== '') db()->prepare("UPDATE users SET pw_hash = ? WHERE id = ?")->execute([password_hash($pw, PASSWORD_DEFAULT), $uid]);
     $chg = [];
     if ($c['name'] !== $name)   $chg[] = '이름: ' . $c['name'] . ' → ' . $name;
     if ($c['phone'] !== $phone) $chg[] = '연락처: ' . $c['phone'] . ' → ' . $phone;
     if ($c['email'] !== $email) $chg[] = '이메일: ' . ($c['email'] ?: '없음') . ' → ' . ($email ?: '없음');
     if ($pw !== '')             $chg[] = '비밀번호를 다시 정함';
+    if (isset($_POST['verified_shown']) && $nowV && !($wasV && $same)) $chg[] = '이메일을 운영진이 확인함으로 표시';
+    if (isset($_POST['verified_shown']) && !$nowV && $wasV && $same)   $chg[] = '이메일 인증 표시를 지움';
     if ($chg) sfpc_log(null, $uid, $me, 'coach', implode("\n", $chg));
     redirect_with($name . ' 선생님의 정보를 고쳤습니다.' . ($pw !== '' ? ' 새 비밀번호를 본인에게 알려 주세요.' : ''));
   }
@@ -731,9 +741,12 @@ sfpc_css('../');
   /* ── 지도교사 ── */
   $q = sfpc_clean((string)($_GET['q'] ?? ''), 30);
   $where = '1'; $args = [SFPC_CONTEST];
+  $onlyUnv = isset($_GET['unverified']);
+  $mailOn = sfpc_mail_on();
+  if ($onlyUnv) $where = "(c.email = '' OR lower(c.verified_email) <> lower(c.email))";
   if ($q !== '') {
     $like = '%' . strtr($q, ['\\' => '\\\\', '%' => '\\%', '_' => '\\_']) . '%';
-    $where = "(c.name LIKE ? ESCAPE '\\' OR u.login_id LIKE ? ESCAPE '\\' OR c.phone LIKE ? ESCAPE '\\')";
+    $where .= " AND (c.name LIKE ? ESCAPE '\\' OR u.login_id LIKE ? ESCAPE '\\' OR c.phone LIKE ? ESCAPE '\\')";
     array_push($args, $like, $like, $like);
   }
   $coaches = all("SELECT c.*, u.login_id, u.role,
@@ -745,8 +758,22 @@ sfpc_css('../');
     <input type="hidden" name="tab" value="coaches">
     <input type="text" name="q" value="<?= h($q) ?>" placeholder="이름 · 아이디 · 연락처">
     <button class="btn" type="submit">찾기</button>
-    <?php if ($q !== ''): ?><a class="btn" href="?tab=coaches">전체 보기</a><?php endif; ?>
+    <?php if ($q !== '' || $onlyUnv): ?><a class="btn" href="?tab=coaches">전체 보기</a><?php endif; ?>
+    <?php if (!$onlyUnv): ?><a class="btn" href="?tab=coaches&amp;unverified=1">이메일 미인증만</a><?php endif; ?>
   </form>
+  <?php
+    $unv = (int)col("SELECT COUNT(*) FROM sfpc_coaches WHERE email = '' OR lower(verified_email) <> lower(email)");
+    $mailFail = (int)col("SELECT COUNT(*) FROM sfpc_mail_log WHERE ok = 0 AND created_at > ?", [date('Y-m-d H:i:s', time() - 86400)]);
+    $lastFail = $mailFail ? one("SELECT * FROM sfpc_mail_log WHERE ok = 0 ORDER BY id DESC LIMIT 1") : null;
+  ?>
+  <div class="note <?= $mailOn ? 'info' : 'warn' ?>" id="mailState">
+    <?php if ($mailOn): $mc = sfpc_mail_conf(); ?>
+      <b>인증 메일 켜짐</b> · 보내는 주소 <?= h($mc['user']) ?> · 최근 24시간 <?= sfpc_mail_sent_today() ?>통 보냄 (한도 <?= (int)$mc['day_max'] ?>통)
+      · 미인증 <?= $unv ?>명<?= $mailFail ? ' · <b>실패 ' . $mailFail . '건</b> (마지막: ' . h($lastFail['to_email'] . ' — ' . $lastFail['err']) . ')' : '' ?>
+    <?php else: ?>
+      <b>인증 메일 꺼짐</b> — 가입할 때 인증번호를 보내지 않습니다. 켜려면 서버 터미널에서 <code>sudo -u www-data php sfpc-cli.php mail</code>
+    <?php endif; ?>
+  </div>
 
   <?php if (!$coaches): ?>
     <div class="empty"><?= $q !== '' ? '찾는 지도교사가 없습니다.' : '아직 가입한 지도교사가 없습니다.' ?></div>
@@ -760,7 +787,8 @@ sfpc_css('../');
           <td><b><?= h($c['name']) ?></b><?= $c['role'] === 'admin' ? ' <span class="sfpc-flag">운영진</span>' : '' ?></td>
           <td class="num"><?= h($c['login_id']) ?></td>
           <td><?= h($c['phone']) ?></td>
-          <td class="small"><?= h($c['email']) ?></td>
+          <td class="small"><?= h($c['email']) ?><?php if ($c['email'] !== ''): ?><?= sfpc_verified($c)
+                ? ' <span class="sfpc-flag ok" title="' . h($c['verified_at']) . '">인증됨</span>' : ' <span class="sfpc-flag">미인증</span>' ?><?php endif; ?></td>
           <td><?php if ((int)$c['team_cnt']): ?><a href="?tab=teams&q=<?= rawurlencode($c['name']) ?>"><?= (int)$c['team_cnt'] ?>팀</a><?php else: ?><span class="muted">없음</span><?php endif; ?></td>
           <td class="right">
             <details class="panel" style="margin:0; text-align:left; min-width:92px">
@@ -771,6 +799,9 @@ sfpc_css('../');
                   <div class="field"><label>이름</label><input type="text" name="name" maxlength="20" value="<?= h($c['name']) ?>"></div>
                   <div class="field"><label>연락처</label><input type="tel" name="phone" value="<?= h($c['phone']) ?>"></div>
                   <div class="field"><label>이메일</label><input type="email" name="email" maxlength="100" value="<?= h($c['email']) ?>"></div>
+                  <input type="hidden" name="verified_shown" value="1">
+                  <label class="check small" style="display:block; margin:-4px 0 12px"><input type="checkbox" name="verified" value="1"<?= sfpc_verified($c) ? ' checked' : '' ?>>
+                    이메일 확인됨 <span class="muted">(전화 등으로 직접 확인했을 때)</span></label>
                   <?php if ($c['role'] !== 'admin'): ?>
                     <div class="field"><label>새 비밀번호 <span class="hint">비밀번호를 잊었을 때만 · 8자 이상</span></label>
                       <input type="text" name="pw" autocomplete="off" placeholder="바꾸지 않으려면 비워 둡니다"></div>

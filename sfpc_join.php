@@ -90,6 +90,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($coach['email'] !== $in['email']) $chg[] = '이메일: ' . ($coach['email'] ?: '없음') . ' → ' . ($in['email'] ?: '없음');
         if ($chg) sfpc_log(null, (int)$uid, $u, 'coach', implode("\n", $chg));
       }
+      /* 이메일 인증 — 새로 가입했거나 주소를 바꿨으면 인증번호를 보내고 인증 화면으로 간다.
+         보내지 못해도(한도 · 메일 서버 문제) 가입은 끝난 것이다. 인증 화면에서 "나중에 인증"으로 넘어갈 수 있다. */
+      $fresh = one("SELECT * FROM sfpc_coaches WHERE user_id = ?", [$uid]);
+      if (sfpc_verify_due($fresh) && (!$coach || strcasecmp((string)$coach['email'], $in['email']) !== 0)) {
+        $e = sfpc_verify_send($fresh);
+        $_SESSION['flash'] = ['msg' => ($coach ? '정보를 고쳤습니다.' : '가입했습니다.') . ($e === '' ? ' 인증번호를 메일로 보냈습니다.' : ''), 'err' => $e];
+        header('Location: sfpc_verify.php?next=' . rawurlencode($next));
+        exit;
+      }
       $_SESSION['flash'] = ['msg' => $coach ? '정보를 고쳤습니다.' : '등록했습니다. 이제 팀을 신청할 수 있습니다.', 'err' => ''];
       header('Location: ' . $next);
       exit;

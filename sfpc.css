@@ -597,3 +597,12 @@ table.sfpc-pvlinks td a:hover{text-decoration:none; background:var(--b50)}
 @media (prefers-reduced-motion: reduce){ .mon-strip i.run, .mon-strip.bar b.run{animation:none} }
 .mon-subtable td.act{text-align:right} .mon-subtable td.act .btn.small{padding:2px 8px; font-size:12px; line-height:1.5}
 .mon-subtable .btn.danger{color:#C0392B; border-color:#E8B4AE; background:#fff} .mon-subtable .btn.danger:hover{background:#FFF1EF}
+
+/* ── 이메일 인증 (sfpc_verify.php) ── */
+.note.warn{background:var(--warn-soft); color:var(--warn)}
+.sfpc-flag.ok{background:#E3F4EA; color:#1F7A4D}
+.sfpc-code{font-size:28px; letter-spacing:.35em; text-align:center; font-variant-numeric:tabular-nums; padding:12px 8px}
+.sfpc-verify-mail{display:block; margin:4px 0 16px; padding:10px 12px; border-radius:10px; background:var(--b50); color:var(--b700); font-weight:700; word-break:break-all}
+.sfpc-verify-sub{display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-top:14px}
+.sfpc-verify-help{margin:18px 0 0; padding-left:18px; font-size:13px; color:var(--muted, #667085)}
+.sfpc-verify-help li{margin:3px 0}

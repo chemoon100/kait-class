@@ -92,6 +92,11 @@ sfpc_css();
     <div class="note info">아직 접수 기간이 아닙니다.</div>
   <?php endif; ?>
 
+  <?php if (!$viewAs && sfpc_verify_due($coach)): ?>
+    <div class="note warn">이메일 인증이 아직 끝나지 않았습니다. 대회 안내를 <b><?= h($coach['email']) ?></b> 로 보내 드리니, 받을 수 있는 주소인지 확인해 주세요.
+      <a class="btn sm" href="sfpc_verify.php?next=sfpc_teams.php" style="margin-left:6px">이메일 인증하기</a></div>
+  <?php endif; ?>
+
   <?php if ($accOpen && $teams): ?>
     <div class="note info">팀 계정이 준비되었습니다. 팀마다 아래 "팀 계정"에서 비밀번호를 정한 뒤, 아이디와 비밀번호를 팀원에게 알려 주세요.
       팀원은 <a href="login.php">로그인</a> 화면에서 그 계정으로 들어옵니다.</div>
@@ -100,7 +105,7 @@ sfpc_css();
   <div class="sfpc-ro">
     <span>신청인 <b><?= h($coach['name']) ?></b></span>
     <span>연락처 <b><?= h($coach['phone']) ?></b></span>
-    <?php if ($coach['email'] !== ''): ?><span><?= h($coach['email']) ?></span><?php endif; ?>
+    <?php if ($coach['email'] !== ''): ?><span><?= h($coach['email']) ?><?= sfpc_verified($coach) ? ' <span class="sfpc-flag ok">인증됨</span>' : (sfpc_mail_on() ? ' <span class="sfpc-flag">미인증</span>' : '') ?></span><?php endif; ?>
     <?php if (!$viewAs): ?><a class="btn sm" href="sfpc_join.php?next=sfpc_teams.php">내 정보 수정</a><?php endif; ?>
   </div>
 
