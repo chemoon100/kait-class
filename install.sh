@@ -528,6 +528,7 @@ step_source() {
 
   # --delete: 이름이 바뀌거나 사라진 옛 파일을 지운다 (업데이트할 때 중요).
   # 제외 목록에 있는 것은 웹 루트에 복사하지 않고, 이미 있으면 지우지도 않는다.
+  # [SFPC] /20??sfpc/ = 옛 스코어보드(sfpc-old-boards.sh 가 받아 둔 것). 업데이트해도 남아 있어야 한다.
   local upgrade=0 bak_dir=""
   [[ -f "$WEB_ROOT/lib.php" ]] && upgrade=1
 
@@ -537,7 +538,7 @@ step_source() {
     mkdir -p "$CLASS_BACKUP_DIR"
     chmod 700 "$CLASS_BACKUP_DIR"            # config.php(비밀 값)가 들어 있다
     bak_dir="$CLASS_BACKUP_DIR/html-$(date +%Y%m%d-%H%M%S)"
-    rsync -a --exclude='/uploads/' "$WEB_ROOT/" "$bak_dir/"
+    rsync -a --exclude='/uploads/' --exclude='/20[0-9][0-9]sfpc/' "$WEB_ROOT/" "$bak_dir/"   # [SFPC] 옛 스코어보드는 바뀌지 않으니 뺀다
     echo "웹 폴더 백업: $bak_dir"
     ls -1d "$CLASS_BACKUP_DIR"/html-* 2>/dev/null | sort | head -n -5 | xargs -r rm -rf
   fi
@@ -554,6 +555,7 @@ step_source() {
     --exclude='/config.php' \
     --exclude='/uploads/' \
     --exclude='/play/' \
+    --exclude='/20[0-9][0-9]sfpc/' \
     "$SRC/" "$WEB_ROOT/"
 
   if [[ ! -f "$WEB_ROOT/config.php" ]]; then
