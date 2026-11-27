@@ -83,6 +83,7 @@ if (isset($_GET['json']) || isset($_GET['hist'])) {
   $pool = is_file($pf) ? json_decode((string)file_get_contents($pf), true) : null;
   $dbf = defined('DB_PATH') ? DB_PATH : (DATA_DIR . '/kait-class.db');
   $r60 = monitor_requests(60);
+  $online = sfpc_online(1800);
   echo json_encode([
     'now' => time(), 'proc' => monitor_proc(), 'db' => monitor_db(), 'req' => $r60, 'users5' => monitor_requests(300)['users'],
     'worker_age' => is_file($hb) ? time() - (int)filemtime($hb) : null,
@@ -90,6 +91,7 @@ if (isset($_GET['json']) || isset($_GET['hist'])) {
     'dbsize' => is_file($dbf) ? (int)(filesize($dbf) / 1024) : null, 'walsize' => is_file($dbf . '-wal') ? (int)(filesize($dbf . '-wal') / 1024) : 0,
     'teams' => (int)col("SELECT COUNT(DISTINCT user_id) FROM submissions WHERE created_at >= ?", [date('Y-m-d H:i:s', time() - 300)]),
     'subs' => $subs,
+    'online' => $online,
   ], JSON_UNESCAPED_UNICODE);
   exit;
 }
@@ -175,6 +177,7 @@ sfpc_css('../');
   <div class="mon-grid" id="gSys"></div>
   <h2>사이트 <span>화면이 빨리 열리는지, 몇 명이 쓰고 있는지</span></h2>
   <div class="mon-grid" id="gSite"></div>
+  <div class="mon-online" id="gOnline" hidden></div>
 
   <h2>지난 기록 <span>1분마다 한 점. 부하 시험을 걸었을 때 어느 순간부터 무너지는지 봅니다</span>
     <select id="monSpan" style="margin-left:10px; width:auto; display:inline-block; font-size:12px"><option value="3600">1시간</option><option value="10800">3시간</option><option value="43200">12시간</option><option value="86400">하루</option></select></h2>
@@ -243,6 +246,27 @@ sfpc_css('../');
   var esc = function (s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
   function card(title, value, level, note, extra) {
     return '<div class="mon-card ' + level + '"><i></i><div class="k">' + title + '</div><div class="v">' + value + '</div><div class="n">' + note + '</div>' + (extra ? '<div class="x">' + extra + '</div>' : '') + '</div>';
+  }
+  /* 접속 중인 사람 명단 — "접속 중" 카드를 누르면 펼친다 */
+  var onShow = false, onWin = 300, onKind = '', onLast = [];
+  function ago(s) { return s < 60 ? s + '초 전' : s < 3600 ? Math.floor(s / 60) + '분 전' : Math.floor(s / 3600) + '시간 전'; }
+  function renderOnline(on) {
+    onLast = on; var box = $('gOnline'); box.hidden = !onShow; if (!onShow) return;
+    var kinds = {}; on.forEach(function (o) { if (o.ago <= onWin) kinds[o.kind] = (kinds[o.kind] || 0) + 1; });
+    var rows = on.filter(function (o) { return o.ago <= onWin && (!onKind || o.kind === onKind); });
+    var opt = function (v, t) { return '<button type="button" class="btn sm' + (onWin === v ? ' primary' : '') + '" data-win="' + v + '">' + t + '</button>'; };
+    var kb = function (k, t) { return '<button type="button" class="btn sm' + (onKind === k ? ' primary' : '') + '" data-kind="' + k + '">' + t + '</button>'; };
+    var h = '<div class="mon-online-bar">' + opt(120, '최근 2분') + opt(300, '5분') + opt(1800, '30분') + '<span class="sep"></span>' + kb('', '모두 ' + Object.keys(kinds).reduce(function (a, k) { return a + kinds[k]; }, 0));
+    ['팀', '지도교사', '운영진', '회원'].forEach(function (k) { if (kinds[k]) h += kb(k, k + ' ' + kinds[k]); });
+    h += '</div>';
+    if (!rows.length) h += '<div class="empty">이 시간 안에 활동한 계정이 없습니다.</div>';
+    else {
+      h += '<div class="tablewrap"><table class="list"><thead><tr><th>계정</th><th>누구</th><th>종류</th><th>마지막으로 본 화면</th><th class="num">마지막 활동</th></tr></thead><tbody>';
+      rows.forEach(function (o) { h += '<tr><td class="num">' + esc(o.login) + '</td><td>' + esc(o.who) + '</td><td>' + esc(o.kind) + '</td><td>' + esc(o.page || '–') + '</td><td class="num">' + ago(o.ago) + '</td></tr>'; });
+      h += '</tbody></table></div>';
+      if (on.length >= 400) h += '<p class="small muted">최근 400명까지만 보입니다.</p>';
+    }
+    box.innerHTML = h;
   }
   function bar(pct, level) { return '<div class="mon-bar"><b class="' + level + '" style="width:' + Math.max(0, Math.min(100, pct)) + '%"></b></div>'; }
 
@@ -348,8 +372,12 @@ sfpc_css('../');
     h += card('화면 요청', r.per_sec + '<small>/초</small>', 'ok', '최근 1분 동안 열린 화면 수 ' + r.n + '개. (제출 · 채점 확인 요청은 여기에 들어가지 않습니다.)');
     var rl = lv(r.p95, 1000, 3000); if (rl === 'bad') bad.push('화면 응답 ' + (r.p95 / 1000).toFixed(1) + '초');
     h += card('화면 응답 시간', r.avg === null ? '–' : r.avg + '<small>ms</small>', rl, rl === 'ok' ? '화면 하나를 만들어 내는 데 걸린 평균 시간. 1000ms(1초)를 넘으면 느리다고 느낍니다.' : '화면이 느리게 열리고 있습니다. CPU · 메모리와 채점 대기를 같이 보세요.', r.p95 === null ? '' : '느린 쪽 5%: ' + r.p95 + 'ms · 가장 느린 것 ' + r.max + 'ms');
-    h += card('접속 중', r.users + '<small>명</small>', 'ok', '최근 1분 안에 화면을 연 로그인 계정 수.', '최근 5분: ' + d.users5 + '명');
+    var on = d.online || [], cnt = function (sec) { return on.filter(function (o) { return o.ago <= sec; }).length; };
+    h += card('접속 중', cnt(120) + '<small>명</small>', 'ok', '최근 2분 안에 활동한 로그인 계정 수. 누르면 누구인지 봅니다.',
+              '최근 5분 ' + cnt(300) + '명 · 30분 ' + on.length + '명 <button type="button" class="btn sm" data-online="1" style="margin-left:6px">' + (onShow ? '명단 닫기' : '명단 보기') + '</button>');
     $('gSite').innerHTML = h;
+    $('gSite').lastChild.setAttribute('data-online', '1'); $('gSite').lastChild.style.cursor = 'pointer';
+    renderOnline(on);
 
     /* 경고 */
     var b = $('monBanner'); b.hidden = !bad.length; b.textContent = bad.length ? '⚠ ' + bad.join(' · ') : '';
@@ -361,6 +389,12 @@ sfpc_css('../');
     prev = d; charts();
   }
   /* 제출 하나하나의 단추 — 재채점 · 취소 */
+  $('gSite').addEventListener('click', function (e) { if (e.target.closest('[data-online]')) { onShow = !onShow; renderOnline(onLast); var b = $('gSite').querySelector('button[data-online]'); if (b) b.textContent = onShow ? '명단 닫기' : '명단 보기'; } });
+  $('gOnline').addEventListener('click', function (e) {
+    var w = e.target.closest('[data-win]'), k = e.target.closest('[data-kind]');
+    if (w) onWin = parseInt(w.getAttribute('data-win'), 10); else if (k) onKind = k.getAttribute('data-kind'); else return;
+    renderOnline(onLast);
+  });
   $('gSubs').addEventListener('click', function (e) {
     var b = e.target.closest('button[data-sub]'); if (!b) return;
     var act = b.getAttribute('data-sub'), id = b.getAttribute('data-id'), who = b.getAttribute('data-who');

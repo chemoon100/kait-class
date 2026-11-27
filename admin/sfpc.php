@@ -5,6 +5,7 @@
      ?tab=summary   접수 현황 (지역 · 참가 구분별 집계, 오프라인 참가 인원과 상의 사이즈)
      ?tab=teams     팀 목록 (찾기 · 참가 자격 · 반려 · 메모 · 내려받기 · 신청 내용 고치기 · 팀별 변경 기록)
      ?tab=coaches   지도교사 (정보 고치기 · 비밀번호 다시 정하기 · 계정 만들기 · 대신 팀 넣기)
+     ?tab=accounts  팀 계정 (비밀번호를 정했는지 · 한 번이라도 로그인했는지 · 마지막으로 들어온 때)
      ?tab=log       변경 기록 (누가 언제 무엇을 바꿨는지)
      ?tab=schools   학교 목록 (나이스에서 받기 · CSV 올리기)
      ?tab=settings  접수 기간 · 안내 문구 · 화면 공개
@@ -14,7 +15,7 @@ require_once __DIR__ . '/../guard.php';
 require_once __DIR__ . '/../layout.php';
 $me = need_admin('../');
 
-const SFPC_TABS = ['summary' => '접수 현황', 'teams' => '팀 목록', 'coaches' => '지도교사', 'study' => '공부하기', 'arena' => '준비 · 대회', 'rejudge' => '재채점', 'log' => '변경 기록',
+const SFPC_TABS = ['summary' => '접수 현황', 'teams' => '팀 목록', 'coaches' => '지도교사', 'accounts' => '팀 계정', 'study' => '공부하기', 'arena' => '준비 · 대회', 'rejudge' => '재채점', 'log' => '변경 기록',
                   'schools' => '학교 목록', 'settings' => '설정'];
 const SFPC_COACH_ID_RE = '/^[A-Za-z][A-Za-z0-9_.-]{3,19}$/';
 $tab = (string)($_GET['tab'] ?? 'summary');
@@ -76,6 +77,48 @@ function sfpc_csv_out(string $file, array $head, array $rows): never {
   echo implode(',', array_map('sfpc_csv_cell', $head)) . "\r\n";
   foreach ($rows as $r) echo implode(',', array_map('sfpc_csv_cell', $r)) . "\r\n";
   exit;
+}
+/* 팀 계정 현황 — 접수된 팀마다 계정 · 비밀번호 · 첫 로그인 · 마지막 로그인 · 캐릭터 · 공부하기.
+   $f: '' 모두 · never 한 번도 로그인 안 함 · nopw 비밀번호를 안 정함 · now 최근 5분 안에 활동 */
+const SFPC_ACC_FILTER = ['' => '모두', 'never' => '한 번도 로그인 안 함', 'nopw' => '비밀번호를 안 정함', 'now' => '지금 들어와 있음'];
+function sfpc_admin_accounts(string $f = ''): array {
+  $rows = all("SELECT t.*, c.name AS coach_name, c.phone AS coach_phone, c.email AS coach_email,
+                      s.first_at, s.last_at, s.page
+               FROM sfpc_teams t
+               LEFT JOIN sfpc_coaches c ON c.user_id = t.coach_user_id
+               LEFT JOIN sfpc_seen s ON s.user_id = t.account_user_id
+               WHERE t.contest = ? AND t.status = 'submitted' ORDER BY t.id", [SFPC_CONTEST]);
+  $solved = [];
+  try {
+    $sset = sfpc_study_set(false);
+    if ($sset) foreach (all("SELECT s.user_id, COUNT(DISTINCT s.problem_id) n FROM submissions s JOIN set_problems sp ON sp.problem_id = s.problem_id AND sp.set_id = ?
+                  WHERE s.verdict = 'AC' GROUP BY s.user_id", [$sset['id']]) as $r) $solved[(int)$r['user_id']] = (int)$r['n'];
+  } catch (Throwable $e) {}
+  $tot = ['all' => 0, 'pw' => 0, 'seen' => 0, 'never' => 0, 'now' => 0];
+  $out = [];
+  $nowCut = date('Y-m-d H:i:s', time() - 300);
+  foreach ($rows as $t) {
+    $t['acc']    = sfpc_account_id($t);
+    $t['has_pw'] = ($t['account_pw_at'] ?? '') !== '';
+    $t['seen']   = (string)($t['first_at'] ?? '') !== '';
+    $t['is_now'] = $t['seen'] && $t['last_at'] >= $nowCut;
+    $t['solved'] = $solved[(int)($t['account_user_id'] ?? 0)] ?? 0;
+    $tot['all']++; $tot['pw'] += (int)$t['has_pw']; $tot['seen'] += (int)$t['seen']; $tot['never'] += (int)!$t['seen']; $tot['now'] += (int)$t['is_now'];
+    if (($f === 'never' && $t['seen']) || ($f === 'nopw' && $t['has_pw']) || ($f === 'now' && !$t['is_now'])) continue;
+    $out[] = $t;
+  }
+  return [$out, $tot];
+}
+if (($_GET['export'] ?? '') === 'accounts') {
+  $f = (string)($_GET['f'] ?? ''); if (!isset(SFPC_ACC_FILTER[$f])) $f = '';
+  [$accs] = sfpc_admin_accounts($f);
+  $rows = [];
+  foreach ($accs as $t) {
+    $rows[] = [sfpc_team_no($t), $t['acc'], $t['team_name'], $t['school_name'], $t['region'], SFPC_CATS[$t['category']]['label'] ?? '',
+               $t['coach_name'], $t['coach_phone'], $t['coach_email'], $t['has_pw'] ? '정함' : '', $t['seen'] ? $t['first_at'] : '', $t['seen'] ? $t['last_at'] : ''];
+  }
+  sfpc_csv_out('sfpc-accounts-' . ($f !== '' ? $f . '-' : '') . date('Ymd-Hi') . '.csv',
+    ['접수번호', '팀계정', '팀명', '학교', '지역', '참가구분', '지도교사', '연락처', '이메일', '비밀번호', '첫로그인', '마지막로그인'], $rows);
 }
 if (isset($_GET['export'])) {
   /* 바깥 스코어보드에 미리 넣을 목록 — 팀(ID · 팀명 · 학교 · 참가 구분 · 정식 여부)과 대회별 문제(번호 · 글자 · 제목) */
@@ -748,6 +791,55 @@ sfpc_css('../');
               </form>
             </details>
           </td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table></div>
+  <?php endif; ?>
+
+<?php elseif ($tab === 'accounts'):
+  /* ── 팀 계정 ── */
+  $af = (string)($_GET['f'] ?? ''); if (!isset(SFPC_ACC_FILTER[$af])) $af = '';
+  [$accs, $at] = sfpc_admin_accounts($af);
+  $accOpen = sfpc_account_open();
+  $agoTxt = function (string $at): string {
+    $s = max(0, time() - strtotime($at));
+    return $s < 60 ? '방금' : ($s < 3600 ? intdiv($s, 60) . '분 전' : ($s < 86400 ? intdiv($s, 3600) . '시간 전' : intdiv($s, 86400) . '일 전'));
+  };
+?>
+  <?php if (!$accOpen): ?>
+    <div class="note info">아직 팀 계정을 나눠 주기 전입니다 (설정의 "팀 계정 나눠 주기"가 꺼져 있음). 나눠 준 뒤부터 이 화면에 비밀번호와 로그인 여부가 채워집니다.</div>
+  <?php endif; ?>
+  <div class="statgrid" id="accStats">
+    <div class="stat"><div class="k">접수 팀</div><div class="v"><?= $at['all'] ?></div></div>
+    <div class="stat"><div class="k">비밀번호 정함</div><div class="v"><?= $at['pw'] ?></div><div class="s">안 정함 <?= $at['all'] - $at['pw'] ?></div></div>
+    <div class="stat"><div class="k">로그인함</div><div class="v"><?= $at['seen'] ?></div><div class="s">한 번이라도 들어온 팀</div></div>
+    <div class="stat"><div class="k">한 번도 안 함</div><div class="v"><?= $at['never'] ?></div><div class="s">대회 전에 연락할 팀</div></div>
+    <div class="stat"><div class="k">지금 들어와 있음</div><div class="v"><?= $at['now'] ?></div><div class="s">최근 5분</div></div>
+  </div>
+  <div class="btnrow" style="margin:14px 0 10px; flex-wrap:wrap">
+    <?php foreach (SFPC_ACC_FILTER as $k => $label): ?>
+      <a class="btn sm<?= $af === $k ? ' primary' : '' ?>" href="?tab=accounts<?= $k !== '' ? '&amp;f=' . $k : '' ?>"><?= h($label) ?></a>
+    <?php endforeach; ?>
+    <a class="btn sm" href="?tab=accounts&amp;export=accounts<?= $af !== '' ? '&amp;f=' . $af : '' ?>" style="margin-left:auto">이 목록 내려받기 (엑셀용 · 연락처 포함)</a>
+  </div>
+  <?php if (!$accs): ?>
+    <div class="empty"><?= $at['all'] ? '해당하는 팀이 없습니다.' : '아직 접수한 팀이 없습니다.' ?></div>
+  <?php else: ?>
+    <p class="small muted" style="margin:0 0 8px"><?= count($accs) ?>팀 · 로그인 기록은 이 기능을 넣은 뒤부터 남습니다. "한 번도 안 함"은 그 뒤로 들어온 적이 없다는 뜻입니다.</p>
+    <div class="scrollx" style="border:0"><table class="list" id="accTable">
+      <thead><tr><th>팀 계정</th><th>팀 · 학교</th><th>지도교사</th><th>비밀번호</th><th>첫 로그인</th><th>마지막 로그인</th><th>캐릭터</th><th class="num">공부하기</th></tr></thead>
+      <tbody>
+      <?php foreach ($accs as $t): ?>
+        <tr class="<?= $t['seen'] ? '' : 'sfpc-acc-never' ?>">
+          <td class="num"><b><?= h($t['acc']) ?></b></td>
+          <td><a href="?tab=teams&amp;q=<?= rawurlencode($t['team_name']) ?>"><?= h($t['team_name']) ?></a><br><span class="small muted"><?= h($t['region'] . ' · ' . $t['school_name']) ?></span></td>
+          <td><?= h((string)$t['coach_name']) ?><br><span class="small muted"><?= h((string)$t['coach_phone']) ?></span></td>
+          <td><?= $t['has_pw'] ? '<span class="st ok">정함</span> <span class="small muted">' . h(substr((string)$t['account_pw_at'], 5, 11)) . '</span>' : '<span class="sfpc-flag">아직</span>' ?></td>
+          <td class="small"><?= $t['seen'] ? h(substr($t['first_at'], 5, 11)) : '<span class="sfpc-flag">한 번도 안 함</span>' ?></td>
+          <td class="small"><?= $t['seen'] ? h(substr($t['last_at'], 5, 11)) . ' <span class="muted">(' . $agoTxt($t['last_at']) . ')</span>' . ($t['is_now'] ? ' <span class="sfpc-flag ok">접속 중</span>' : '') : '–' ?></td>
+          <td class="small"><?= ($t['avatar'] ?? '') !== '' ? '만듦' : '<span class="muted">–</span>' ?></td>
+          <td class="num"><?= (int)$t['solved'] ?><?= ($t['study_done_at'] ?? '') !== '' ? ' <span class="sfpc-flag ok">수료</span>' : '' ?></td>
         </tr>
       <?php endforeach; ?>
       </tbody>

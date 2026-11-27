@@ -606,3 +606,9 @@ table.sfpc-pvlinks td a:hover{text-decoration:none; background:var(--b50)}
 .sfpc-verify-sub{display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-top:14px}
 .sfpc-verify-help{margin:18px 0 0; padding-left:18px; font-size:13px; color:var(--muted, #667085)}
 .sfpc-verify-help li{margin:3px 0}
+
+/* ── 접속 중 명단 (서버 모니터링) · 팀 계정 탭 ── */
+.mon-online{margin-top:10px; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:#fff}
+.mon-online-bar{display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:10px}
+.mon-online-bar .sep{width:1px; height:18px; background:var(--line); margin:0 4px}
+.sfpc-acc-never td{background:#FFF9EC}

@@ -26,7 +26,7 @@ if (PHP_SAPI !== 'cli' && !defined('SFPC_REQ_LOGGED')) {
 }
 
 /* 표 구조를 바꿀 때마다 1씩 올린다 */
-const SFPC_SCHEMA = 14;
+const SFPC_SCHEMA = 15;
 
 /* 올해 대회. 내년에는 이 값과 설정만 바꾸면 접수를 새로 받을 수 있다. */
 const SFPC_CONTEST = '2026';
@@ -318,11 +318,68 @@ if ((int)sfpc_setting('sfpc_schema') !== SFPC_SCHEMA) {
   db()->exec("CREATE INDEX IF NOT EXISTS idx_sfpc_jud_round ON sfpc_judgements(round_id, id)");
   /* 14 — 지도교사 이메일 인증 (sfpc_mail.php). 인증한 주소 · 인증번호 · 보낸 메일 기록. */
   sfpc_mail_schema();
+  /* 15 — 계정마다 처음 · 마지막으로 들어온 때 (sfpc_seen_touch). "한 번이라도 로그인한 팀인가" · "지금 누가 들어와 있나"에 쓴다. */
+  db()->exec("CREATE TABLE IF NOT EXISTS sfpc_seen(
+    user_id INTEGER PRIMARY KEY, first_at TEXT NOT NULL, last_at TEXT NOT NULL, page TEXT NOT NULL DEFAULT '')");
+  db()->exec("CREATE INDEX IF NOT EXISTS idx_sfpc_seen_last ON sfpc_seen(last_at)");
   /* 학교 목록이 비어 있으면 함께 넣어 둔 목록으로 채운다 — 설치만 하면 학교 찾기가 바로 된다 */
   if ((int)db()->query("SELECT COUNT(*) FROM sfpc_schools")->fetchColumn() === 0 && sfpc_schools_load_bundled() > 0) {
     setting_set('sfpc_schools_at', now());
   }
   setting_set('sfpc_schema', (string)SFPC_SCHEMA);
+}
+
+/* ── 누가 들어와 있나 ──────────────────────────────
+   로그인한 계정이 화면을 열 때마다 "마지막으로 본 때"와 "무슨 화면"을 적는다 (sfpc_seen). 처음 적힌 때가 곧 첫 로그인이다.
+   요청마다 DB 에 쓰면 대회 중에 부담이 되므로 한 계정에 30초에 한 번만 쓴다 (화면이 바뀌면 3초 뒤부터).
+   주기적으로 묻는 요청(알림 확인 등)은 시각만 고치고 "무슨 화면"은 건드리지 않는다. 주소 · 내용은 적지 않고 화면 이름만 남긴다. */
+const SFPC_SEEN_EVERY = 30;
+const SFPC_SEEN_BG = ['sfpc_live', 'sfpc_feed', 'api'];
+const SFPC_PAGE_NAME = ['index' => '첫 화면', 'sfpc' => '접수 안내', 'sfpc_landing' => '첫 화면', 'sfpc_join' => '내 정보', 'sfpc_verify' => '이메일 인증',
+  'sfpc_teams' => '내 팀', 'sfpc_team' => '팀 신청 · 수정', 'sfpc_me' => '팀 화면', 'sfpc_char' => '캐릭터 꾸미기', 'sfpc_study' => '공부하기', 'sfpc_boss' => '공부하기 · 보스',
+  'sfpc_ready' => '준비하기', 'sfpc_practice' => '연습', 'sfpc_contest' => '도전하기', 'sfpc_board' => '스코어보드', 'sfpc_rank' => '연타 순위', 'sfpc_ask' => '문의',
+  'problem' => '문제 풀기', 'problems' => '문제 모음', 'results' => '채점 결과', 'notices' => '공지사항', 'notice' => '공지사항', 'password' => '비밀번호 바꾸기', 'user' => '내 계정', 'admin' => '운영 화면'];
+function sfpc_seen_touch(): void {
+  $uid = (int)($_SESSION['uid'] ?? 0);
+  if (!$uid) return;
+  $sn = (string)($_SERVER['SCRIPT_NAME'] ?? '');
+  $page = str_contains($sn, '/admin/') ? 'admin' : basename($sn, '.php');
+  $bg = in_array($page, SFPC_SEEN_BG, true);
+  $age = time() - (int)($_SESSION['sfpc_seen_t'] ?? 0);
+  if ($age < 3 || ($age < SFPC_SEEN_EVERY && ($bg || $page === (string)($_SESSION['sfpc_seen_p'] ?? '')))) return;
+  try {
+    if ($bg) db()->prepare("INSERT INTO sfpc_seen(user_id, first_at, last_at, page) VALUES(?,?,?,'')
+                            ON CONFLICT(user_id) DO UPDATE SET last_at = excluded.last_at")->execute([$uid, now(), now()]);
+    else     db()->prepare("INSERT INTO sfpc_seen(user_id, first_at, last_at, page) VALUES(?,?,?,?)
+                            ON CONFLICT(user_id) DO UPDATE SET last_at = excluded.last_at, page = excluded.page")->execute([$uid, now(), now(), substr($page, 0, 40)]);
+    $_SESSION['sfpc_seen_t'] = time();
+    if (!$bg) $_SESSION['sfpc_seen_p'] = $page;
+  } catch (Throwable $e) { /* 기록을 못 남겨도 화면은 떠야 한다 (DB 가 바쁠 때) */ }
+}
+if (PHP_SAPI !== 'cli') sfpc_seen_touch();
+
+/* 계정 종류: 팀 · 지도교사 · 운영진 · 회원 */
+function sfpc_user_kind(array $u, bool $isCoach): string {
+  if (($u['role'] ?? '') === 'admin') return '운영진';
+  if (($u['source'] ?? '') === SFPC_ACCOUNT_SOURCE) return '팀';
+  return $isCoach ? '지도교사' : '회원';
+}
+/* 최근 $sec 초 안에 들어온 계정 (가장 최근 것부터). 모니터링의 "접속 중" 명단. */
+function sfpc_online(int $sec = 1800, int $limit = 400): array {
+  $rows = all("SELECT s.user_id, s.last_at, s.page, u.login_id, u.name, u.role, u.source,
+                      t.team_name, t.school_name, t.id AS team_id, (c.user_id IS NOT NULL) AS is_coach
+               FROM sfpc_seen s JOIN users u ON u.id = s.user_id
+               LEFT JOIN sfpc_teams t ON t.account_user_id = u.id AND t.contest = ?
+               LEFT JOIN sfpc_coaches c ON c.user_id = u.id
+               WHERE s.last_at >= ? ORDER BY s.last_at DESC LIMIT " . (int)$limit, [SFPC_CONTEST, date('Y-m-d H:i:s', time() - $sec)]);
+  $out = [];
+  foreach ($rows as $r) {
+    $kind = sfpc_user_kind($r, (bool)$r['is_coach']);
+    $out[] = ['login' => $r['login_id'], 'kind' => $kind,
+              'who' => $kind === '팀' && $r['team_name'] !== null ? $r['team_name'] . ' · ' . $r['school_name'] : $r['name'],
+              'page' => SFPC_PAGE_NAME[$r['page']] ?? ($r['page'] !== '' ? $r['page'] : ''), 'ago' => max(0, time() - strtotime($r['last_at']))];
+  }
+  return $out;
 }
 
 /* ── 접수 기간 ───────────────────────────────────── */

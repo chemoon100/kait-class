@@ -12,7 +12,7 @@
        암호를 정하지 않았으면 메일로는 보내지 않는다 — 접수 자료(연락처 · 학생 이름)가 그대로 메일에 실리지 않게.
 
    암호를 건 파일은 흔한 도구로 풀 수 있다:
-       openssl enc -d -aes-256-cbc -pbkdf2 -in sfpc-….db.gz.enc -out sfpc-….db.gz
+       openssl enc -d -aes-256-cbc -pbkdf2 -iter 10000 -md sha256 -in sfpc-….db.gz.enc -out sfpc-….db.gz
    ═══════════════════════════════════════════════ */
 declare(strict_types=1);
 if (!defined('DATA_DIR')) { http_response_code(404); exit; }
@@ -92,7 +92,7 @@ function sfpc_backup_run(): array {
         $r['mail'] = $e === '' ? 'big' : $e;
       } else {
         $e = sfpc_mail_send($c['user'], '[SFPC 백업] ' . date('Y-m-d H:i') . ' · ' . $info,
-          $body . "첨부 파일은 암호가 걸려 있습니다. 푸는 방법:\r\n  openssl enc -d -aes-256-cbc -pbkdf2 -in " . $name . " -out " . basename($file) . "\r\n"
+          $body . "첨부 파일은 암호가 걸려 있습니다. 푸는 방법:\r\n  openssl enc -d -aes-256-cbc -pbkdf2 -iter 10000 -md sha256 -in " . $name . " -out " . basename($file) . "\r\n"
                 . "되돌리는 방법: 서버에서  sudo -u www-data php sfpc-cli.php restore (파일)\r\n", 'backup', ['name' => $name, 'data' => $enc]);
         $r['mail'] = $e === '' ? 'sent' : $e;
       }
