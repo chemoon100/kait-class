@@ -409,11 +409,20 @@ $site = site_name();
   }
   function start() { if (!calm && !raf && !document.hidden) { last = performance.now(); raf = requestAnimationFrame(loop); } }
   function stop() { if (raf) { cancelAnimationFrame(raf); raf = 0; } }
-  function fit() {
-    dpr = Math.min(2, window.devicePixelRatio || 1);
-    W = lp.clientWidth; H = lp.clientHeight;
+  /* 그림판을 화면 상자(.lp)와 똑같은 크기로 맞춘다. 돌려주는 값: 크기가 바뀌었는가.
+     [SFPC] 그림판은 CSS 로 상자 전체에 늘어나 있어서, 그림판의 실제 크기가 상자와 다르면 그린 것이 통째로 늘어난다 —
+     내용이 화면보다 길어 상자가 커졌을 때(낮은 창 · 제목을 점으로 바꾼 뒤) 접수하기 단추 둘레의 불빛이 단추보다 아래에 그려졌다. */
+  function sizeCanvas() {
+    var d = Math.min(2, window.devicePixelRatio || 1), w = lp.clientWidth, h = lp.clientHeight;
+    if (w === W && h === H && d === dpr && cv.width === Math.round(w * d)) return false;
+    dpr = d; W = w; H = h;
     cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    return true;
+  }
+  function fit() {
+    sizeCanvas();
     renderTitle();
+    sizeCanvas();          /* 제목 크기가 바뀌면 상자 높이도 바뀐다 — 다시 잰 뒤에 캐릭터를 놓는다 */
     makeChars();
     if (calm) frame(0, true);
   }
@@ -427,6 +436,14 @@ $site = site_name();
   window.addEventListener('resize', function () { clearTimeout(rt); rt = setTimeout(fit, 120); });
 
   fit(); start();
+  /* 그 밖의 까닭으로 상자 크기가 바뀔 때 (글꼴이 늦게 옴 · 위쪽 단계 칸의 줄 바꿈 · 주소창이 접힘) */
+  if (window.ResizeObserver) {
+    var ro = 0;
+    new ResizeObserver(function () {
+      if (lp.clientWidth === W && lp.clientHeight === H) return;
+      clearTimeout(ro); ro = setTimeout(function () { var w0 = W; if (sizeCanvas()) { if (W !== w0) makeChars(); if (calm) frame(0, true); } }, 60);   /* 높이만 바뀌면 캐릭터는 그대로 걷는다 */
+    }).observe(lp);
+  }
   /* 글꼴이 오면 제목을 점으로 바꾼다 */
   if (document.fonts && document.fonts.load) {
     document.fonts.load(FONT, lp.dataset.main + lp.dataset.key).then(function (f) {
