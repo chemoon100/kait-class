@@ -31,6 +31,12 @@ function sfpc_mail_schema(): void {
     ip TEXT NOT NULL DEFAULT '', tries INTEGER NOT NULL DEFAULT 0, used INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL, expires_at TEXT NOT NULL)");
   db()->exec("CREATE INDEX IF NOT EXISTS idx_sfpc_code_user ON sfpc_email_codes(user_id, id)");
+  /* 비밀번호 다시 정하기에 쓰는 인증번호 (sfpc_reset.php). user_id 0 은 맞는 계정이 없던 요청 — 횟수 제한을 세려고 남긴다. */
+  db()->exec("CREATE TABLE IF NOT EXISTS sfpc_pw_resets(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, email TEXT NOT NULL, code_hash TEXT NOT NULL DEFAULT '',
+    ip TEXT NOT NULL DEFAULT '', tries INTEGER NOT NULL DEFAULT 0, used INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL, expires_at TEXT NOT NULL)");
+  db()->exec("CREATE INDEX IF NOT EXISTS idx_sfpc_reset_user ON sfpc_pw_resets(user_id, id)");
   /* 보낸 메일의 기록. 하루 한도를 세고, "메일이 안 와요" 문의에 답할 때 본다. 내용은 남기지 않는다. */
   db()->exec("CREATE TABLE IF NOT EXISTS sfpc_mail_log(
     id INTEGER PRIMARY KEY AUTOINCREMENT, to_email TEXT NOT NULL, kind TEXT NOT NULL, ok INTEGER NOT NULL,
@@ -200,5 +206,77 @@ function sfpc_verify_check(array $coach, string $code, array $actor): string {
   db()->prepare("UPDATE sfpc_email_codes SET used = 1 WHERE id = ?")->execute([$row['id']]);
   db()->prepare("UPDATE sfpc_coaches SET verified_email = email, verified_at = ? WHERE user_id = ?")->execute([now(), $uid]);
   sfpc_log(null, $uid, $actor, 'coach', '이메일 인증: ' . $coach['email']);
+  return '';
+}
+
+/* ── 비밀번호 다시 정하기 (지도교사) ────────────────
+   가입할 때 적은 이메일로 인증번호를 보내고, 그 번호를 아는 사람이 새 비밀번호를 정한다 (sfpc_reset.php).
+   · 운영진 계정과 팀 계정은 여기서 바꾸지 않는다 (운영진은 서버의 reset-admin.php, 팀 계정은 지도교사의 "내 팀" 화면).
+   · 맞는 계정이 있든 없든 화면에는 같은 말만 보인다 — 누가 가입했는지 떠보지 못하게.
+   · 아이디를 비워도 된다. 그 이메일의 계정이 하나면 메일에 아이디를 함께 적어 보낸다 (아이디를 잊은 사람).
+   돌려주는 값: ['uid' => 맞은 계정(없으면 0), 'err' => 사용자에게 보일 문구('' 이면 계속)] */
+const SFPC_RESET_PER_HOUR = 3;
+function sfpc_reset_request(string $loginId, string $email): array {
+  $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+  $hourAgo = date('Y-m-d H:i:s', time() - 3600);
+  if (!sfpc_mail_on()) return ['uid' => 0, 'err' => '지금은 메일을 보낼 수 없습니다. 운영진에게 문의해 주세요. (' . sfpc_setting('sfpc_contact') . ')'];
+  if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return ['uid' => 0, 'err' => '이메일 주소를 확인해 주세요.'];
+  if ($ip !== '' && (int)col("SELECT COUNT(*) FROM sfpc_pw_resets WHERE ip = ? AND created_at > ?", [$ip, $hourAgo]) >= SFPC_CODE_IP_HOUR)
+    return ['uid' => 0, 'err' => '이 자리에서 너무 여러 번 요청했습니다. 한 시간쯤 뒤에 다시 시도해 주세요.'];
+
+  $sql = "SELECT u.id, u.login_id, c.email FROM sfpc_coaches c JOIN users u ON u.id = c.user_id
+          WHERE lower(c.email) = lower(?) AND u.role <> 'admin' AND u.source <> ? AND u.approved = 1";
+  $found = $loginId !== '' ? all($sql . " AND u.login_id = ?", [$email, SFPC_ACCOUNT_SOURCE, $loginId]) : all($sql . " ORDER BY u.id", [$email, SFPC_ACCOUNT_SOURCE]);
+  $note = function (int $uid) use ($email, $ip) {     /* 요청이 있었다는 것만 남긴다 */
+    db()->prepare("INSERT INTO sfpc_pw_resets(user_id, email, ip, used, created_at, expires_at) VALUES(?,?,?,1,?,?)")->execute([$uid, $email, $ip, now(), now()]);
+  };
+  if (!$found) { $note(0); return ['uid' => 0, 'err' => '']; }
+  $title = sfpc_setting('sfpc_title');
+  if (count($found) > 1) {
+    /* 같은 이메일로 계정을 여러 개 만든 경우 — 아이디만 알려 주고, 아이디를 넣어 다시 요청하게 한다 */
+    $note(0);
+    if ((int)col("SELECT COUNT(*) FROM sfpc_mail_log WHERE to_email = ? AND kind = 'reset_ids' AND created_at > ?", [$email, $hourAgo]) < 2)
+      sfpc_mail_send($email, '[SFPC] 가입하신 아이디 안내', $title . " 에 이 이메일로 가입한 아이디가 여러 개입니다.\r\n\r\n    "
+        . implode("\r\n    ", array_column($found, 'login_id')) . "\r\n\r\n비밀번호를 다시 정하려면 아이디를 함께 적어 다시 요청해 주세요.\r\n", 'reset_ids');
+    return ['uid' => 0, 'err' => ''];
+  }
+  $u = $found[0]; $uid = (int)$u['id'];
+  $last = (string)col("SELECT created_at FROM sfpc_pw_resets WHERE user_id = ? ORDER BY id DESC LIMIT 1", [$uid]);
+  if ($last !== '' && time() - strtotime($last) < SFPC_CODE_WAIT) return ['uid' => $uid, 'err' => ''];          /* 방금 보냈다 — 또 보내지 않고 그 번호를 쓰게 한다 */
+  if ((int)col("SELECT COUNT(*) FROM sfpc_pw_resets WHERE user_id = ? AND created_at > ?", [$uid, $hourAgo]) >= SFPC_RESET_PER_HOUR) return ['uid' => $uid, 'err' => ''];
+
+  $code = str_pad((string)random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+  $e = sfpc_mail_send($u['email'], '[SFPC] 비밀번호 다시 정하기 인증번호 ' . $code,
+    $title . " 비밀번호를 다시 정하는 인증번호입니다.\r\n\r\n    아이디: " . $u['login_id'] . "\r\n    인증번호: " . $code . "\r\n\r\n"
+    . "화면의 인증번호 칸에 위 여섯 자리를 입력하고 새 비밀번호를 정해 주세요. " . SFPC_CODE_MIN . "분 동안 쓸 수 있습니다.\r\n"
+    . "직접 요청하지 않으셨다면 이 메일은 지우셔도 됩니다. 비밀번호는 바뀌지 않습니다.\r\n\r\n문의: " . sfpc_setting('sfpc_contact') . "\r\n", 'reset');
+  if ($e === 'limit') return ['uid' => 0, 'err' => '오늘 보낼 수 있는 메일을 모두 보냈습니다. 내일 다시 시도하거나 운영진에게 문의해 주세요. (' . sfpc_setting('sfpc_contact') . ')'];
+  if ($e !== '') { $note(0); return ['uid' => 0, 'err' => '']; }     /* 보내지 못한 까닭은 운영 기록(sfpc_mail_log)에만 남는다 */
+  db()->prepare("UPDATE sfpc_pw_resets SET used = 1 WHERE user_id = ? AND used = 0")->execute([$uid]);
+  db()->prepare("INSERT INTO sfpc_pw_resets(user_id, email, code_hash, ip, created_at, expires_at) VALUES(?,?,?,?,?,?)")
+      ->execute([$uid, $u['email'], sfpc_code_hash($uid, 'reset' . $code), $ip, now(), date('Y-m-d H:i:s', time() + SFPC_CODE_MIN * 60)]);
+  return ['uid' => $uid, 'err' => ''];
+}
+/* 인증번호가 맞으면 새 비밀번호를 정한다. '' 성공 · 그 밖은 사용자에게 보일 문구 */
+function sfpc_reset_finish(int $uid, string $code, string $pw): string {
+  $bad = '인증번호가 맞지 않거나 시간이 지났습니다. 메일의 여섯 자리를 다시 확인해 주세요.';
+  $code = preg_replace('/\D/', '', $code);
+  if (strlen($pw) < 8) return '새 비밀번호는 8자 이상이어야 합니다.';
+  $row = $uid ? one("SELECT * FROM sfpc_pw_resets WHERE user_id = ? AND used = 0 ORDER BY id DESC LIMIT 1", [$uid]) : null;
+  if (!$row || $row['expires_at'] < now()) return $bad;
+  if ((int)$row['tries'] >= SFPC_CODE_TRIES) return '여러 번 틀려 이 인증번호는 쓸 수 없습니다. 처음부터 다시 요청해 주세요.';
+  if (strlen($code) !== 6 || !hash_equals($row['code_hash'], sfpc_code_hash($uid, 'reset' . $code))) {
+    db()->prepare("UPDATE sfpc_pw_resets SET tries = tries + 1 WHERE id = ?")->execute([$row['id']]);
+    return $bad;
+  }
+  $u = one("SELECT id, login_id, name, role, source FROM users WHERE id = ?", [$uid]);
+  if (!$u || $u['role'] === 'admin' || $u['source'] === SFPC_ACCOUNT_SOURCE) return $bad;
+  db()->prepare("UPDATE sfpc_pw_resets SET used = 1 WHERE id = ?")->execute([$row['id']]);
+  db()->prepare("UPDATE users SET pw_hash = ? WHERE id = ?")->execute([password_hash($pw, PASSWORD_DEFAULT), $uid]);
+  db()->prepare("DELETE FROM login_attempts WHERE login_id = ?")->execute([$u['login_id']]);
+  /* 그 메일을 받았다는 것이 곧 주소 확인이다 */
+  db()->prepare("UPDATE sfpc_coaches SET verified_email = email, verified_at = ? WHERE user_id = ? AND lower(email) = lower(?) AND lower(verified_email) <> lower(email)")
+      ->execute([now(), $uid, $row['email']]);
+  sfpc_log(null, $uid, $u, 'coach', '메일 인증으로 비밀번호를 다시 정함');
   return '';
 }

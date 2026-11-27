@@ -916,3 +916,12 @@ a.setmark:hover{text-decoration:underline}
 .aiset-row{display:flex; gap:8px; align-items:center}
 .aiset-row input[type=password]{flex:1}
 .ai-bulk{display:flex; align-items:center; gap:10px; margin-top:10px; padding-top:10px; border-top:1px dashed var(--line)}
+
+/* [SFPC] 휴대폰: 위쪽 메뉴가 세로로 일곱 줄씩 쌓이던 것을 한 줄로 두고 옆으로 민다 */
+@media (max-width:560px){
+  .top-in{flex-wrap:wrap; height:auto; padding-top:8px; padding-bottom:0; row-gap:4px}
+  .top .util{margin-left:auto}
+  .top .mainnav{order:3; flex:1 0 100%; display:flex; flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; margin:0 -20px; padding:0 14px 6px}
+  .top .mainnav::-webkit-scrollbar{display:none}
+  .top .mainnav a{flex:0 0 auto; white-space:nowrap}
+}

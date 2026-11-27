@@ -122,7 +122,8 @@ if (($_GET['export'] ?? '') === 'accounts') {
 }
 if (isset($_GET['export'])) {
   /* 바깥 스코어보드에 미리 넣을 목록 — 팀(ID · 팀명 · 학교 · 참가 구분 · 정식 여부)과 대회별 문제(번호 · 글자 · 제목) */
-  if (in_array($_GET['export'], ['teams', 'teams_csv', 'problems'], true)) {
+  /* 준비 · 대회 탭에서 온 것만 — 팀 목록 탭의 "팀 명단 내려받기"도 export=teams 라서, 탭을 보지 않으면 명단 대신 이 JSON 이 나간다 */
+  if (($_GET['tab'] ?? '') === 'arena' && in_array($_GET['export'], ['teams', 'teams_csv', 'problems'], true)) {
     $json = function (string $file, array $data): never {
       while (ob_get_level() > 0) ob_end_clean();
       header('Content-Type: application/json; charset=utf-8'); header('Content-Disposition: attachment; filename="' . $file . '"'); header('Cache-Control: no-store');

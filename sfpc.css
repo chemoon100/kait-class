@@ -612,3 +612,18 @@ table.sfpc-pvlinks td a:hover{text-decoration:none; background:var(--b50)}
 .mon-online-bar{display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:10px}
 .mon-online-bar .sep{width:1px; height:18px; background:var(--line); margin:0 4px}
 .sfpc-acc-never td{background:#FFF9EC}
+
+/* ── 휴대폰 (좁은 화면) ──
+   · 팀원 표: 이름 칸이 학년 · 사이즈에 밀려 한 글자도 안 보이던 것을, 이름을 윗줄에 통으로 두고 학년 · 사이즈를 아랫줄에 둔다.
+   (위쪽 메뉴를 한 줄로 두는 것은 모든 화면에 걸리도록 style.css 끝에 있다) */
+@media (max-width:560px){
+  .sfpc-members thead{display:none}
+  .sfpc-members tr{display:flex; flex-wrap:wrap; gap:6px 8px; align-items:center; padding:10px 0; border-top:1px solid var(--line)}
+  .sfpc-members tr:first-child{border-top:0; padding-top:0}
+  .sfpc-members td{padding:0}
+  .sfpc-members td.n{width:64px; flex:0 0 64px}
+  .sfpc-members td.n + td{flex:1 1 calc(100% - 72px); min-width:0}
+  .sfpc-members .c-grade, .sfpc-members .c-shirt{width:auto; flex:1 1 0; min-width:0; margin-left:72px}
+  .sfpc-members .c-grade + .c-shirt{margin-left:0}
+  .sfpc-members .c-shirt.sfpc-hide{display:none}
+}

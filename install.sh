@@ -480,6 +480,14 @@ step_web_pkg() {
     php${PHP_VER}-fpm php${PHP_VER}-cli php${PHP_VER}-sqlite3 php${PHP_VER}-mbstring \
     php${PHP_VER}-curl php${PHP_VER}-xml php${PHP_VER}-zip
   systemctl enable --now nginx php${PHP_VER}-fpm
+  # [SFPC] 로그인 유지 시간. PHP 기본값은 24분 — 접수 화면을 열어 두고 팀원 이름을 모으는 사이에 로그인이 풀려
+  #        저장할 때 입력한 것을 잃는다. 12시간으로 늘린다 (Ubuntu 의 세션 정리도 이 값을 따른다).
+  cat > "/etc/php/${PHP_VER}/mods-available/sfpc.ini" <<'INI'
+; SFPC — 로그인 유지 시간 (초)
+session.gc_maxlifetime = 43200
+INI
+  phpenmod -v "${PHP_VER}" sfpc
+  systemctl reload "php${PHP_VER}-fpm"
   php -v
 }
 

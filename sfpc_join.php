@@ -194,7 +194,7 @@ sfpc_css();
     <button class="btn primary big" type="submit"><?= $coach ? '저장' : ($needAccount ? '가입하고 팀 신청하기' : '등록하고 팀 신청하기') ?></button>
     <?php if ($needAccount): ?>
       <p class="small muted" style="margin:14px 0 0; text-align:center">
-        비밀번호를 잊으면 운영진에게 문의해 주세요. 직접 찾는 기능은 없습니다.
+        비밀번호를 잊으면 로그인 화면의 "아이디 · 비밀번호 찾기"에서 이 이메일로 다시 정할 수 있습니다.
       </p>
     <?php endif; ?>
   </form>
