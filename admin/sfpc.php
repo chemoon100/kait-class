@@ -570,6 +570,11 @@ sfpc_css('../');
     unset($g);
   }
   $coaches = (int)col("SELECT COUNT(DISTINCT coach_user_id) FROM sfpc_teams WHERE contest = ? AND status = 'submitted'", [SFPC_CONTEST]);
+  /* 백업 상태 — 마지막 백업이 언제였고 잘 됐는지. 하루 반 넘게 없으면 경고로 바꾼다. */
+  require_once __DIR__ . '/../sfpc_backup.php';
+  $lb = sfpc_backup_last();
+  $lbOld = !$lb || !$lb['ok'] || strtotime((string)$lb['at']) < time() - 36 * 3600;
+  $lbMailBad = $lb && !in_array($lb['mail'], ['sent', ''], true);
   $shirts = [];
   foreach (all("SELECT m.shirt, COUNT(*) AS n FROM sfpc_members m JOIN sfpc_teams t ON t.id = m.team_id
                 WHERE t.contest = ? AND t.status = 'submitted' AND t.onsite = 1 GROUP BY m.shirt", [SFPC_CONTEST]) as $r) {
@@ -578,6 +583,18 @@ sfpc_css('../');
   $host = sfpc_setting('sfpc_host_region');
   $cell = fn(?array $g) => $g ? $g[0] . '팀 <span class="muted">' . $g[1] . '명</span>' : '';
 ?>
+  <div class="note <?= $lbOld ? 'warn' : 'info' ?>" id="backupState" style="margin-bottom:14px">
+    <?php if (!$lb): ?>
+      <b>백업 기록이 없습니다.</b> 서버 터미널에서 <code>sudo -u www-data php sfpc-cli.php backup</code> 으로 한 번 돌려 보세요. (매일 새벽 4시에 저절로 돕니다)
+    <?php elseif (!$lb['ok']): ?>
+      <b>마지막 백업이 실패했습니다</b> (<?= h($lb['at']) ?>) — <?= h($lb['err']) ?>
+    <?php else: ?>
+      <b>마지막 백업</b> <?= h(substr($lb['at'], 0, 16)) ?> · <?= h($lb['info']) ?> · <?= number_format($lb['size'] / 1024) ?>KB
+      · <?= h(SFPC_BACKUP_MAIL_NAME[$lb['mail']] ?? ('메일 실패: ' . $lb['mail'])) ?>
+      <?= $lbOld ? ' · <b>하루 넘게 새 백업이 없습니다</b>' : '' ?>
+    <?php endif; ?>
+  </div>
+
   <div class="statgrid">
     <div class="stat"><div class="k">접수 팀</div><div class="v"><?= $tot['teams'] ?></div><div class="s">지도교사 <?= $coaches ?>명</div></div>
     <div class="stat"><div class="k">참가 인원</div><div class="v"><?= $tot['people'] ?></div><div class="s">팀원 기준</div></div>

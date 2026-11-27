@@ -62,7 +62,8 @@ function sfpc_mail_left(): int {
 
 /* SMTP 로 한 통 보낸다. 돌려주는 값: '' 성공 · 그 밖은 오류 문구(운영 기록용 — 사용자에게 그대로 보이지 않는다).
    465(처음부터 암호화) · 587(STARTTLS) 을 쓴다. 암호화 없이 보내는 것은 시험용 설정(tls => false)에서만. */
-function sfpc_smtp_send(array $c, string $to, string $subject, string $body): string {
+/* $attach: ['name' => 파일 이름, 'data' => 내용] 을 주면 첨부로 붙인다 (백업 메일). */
+function sfpc_smtp_send(array $c, string $to, string $subject, string $body, ?array $attach = null): string {
   $port = (int)$c['port'];
   $tls  = $c['tls'] ?? true;
   $addr = (($tls && $port === 465) ? 'ssl://' : 'tcp://') . $c['host'] . ':' . $port;
@@ -96,30 +97,42 @@ function sfpc_smtp_send(array $c, string $to, string $subject, string $body): st
   if (($e = $cmd('RCPT TO:<' . $to . '>', '25')) !== '')           return $fail('받는 주소', $e);
   if (($e = $cmd('DATA', '354')) !== '')                           return $fail('DATA', $e);
   $b64 = fn(string $s) => '=?UTF-8?B?' . base64_encode($s) . '?=';
-  $msg = implode("\r\n", [
+  $head = [
     'Date: ' . date('r'),
     'From: ' . $b64((string)$c['name']) . ' <' . $c['user'] . '>',
     'To: <' . $to . '>',
     'Subject: ' . $b64($subject),
     'Message-ID: <' . bin2hex(random_bytes(12)) . '@' . $host . '>',
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=UTF-8',
-    'Content-Transfer-Encoding: base64',
-    '',
-    rtrim(chunk_split(base64_encode($body), 76, "\r\n")),
-  ]);
+  ];
+  $text = ['Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', rtrim(chunk_split(base64_encode($body), 76, "\r\n"))];
+  if ($attach === null) {
+    $msg = implode("\r\n", array_merge($head, $text));
+  } else {
+    $bd = 'sfpc-' . bin2hex(random_bytes(12));
+    $fn = preg_replace('/[^A-Za-z0-9._-]/', '_', (string)$attach['name']);
+    $msg = implode("\r\n", array_merge($head, ['Content-Type: multipart/mixed; boundary="' . $bd . '"', '', '--' . $bd], $text, [
+      '--' . $bd,
+      'Content-Type: application/octet-stream; name="' . $fn . '"',
+      'Content-Disposition: attachment; filename="' . $fn . '"',
+      'Content-Transfer-Encoding: base64',
+      '',
+      rtrim(chunk_split(base64_encode((string)$attach['data']), 76, "\r\n")),
+      '--' . $bd . '--',
+    ]));
+  }
   if (($e = $cmd($msg . "\r\n.", '250')) !== '')      return $fail('보내기', $e);
   @fwrite($fp, "QUIT\r\n"); @fclose($fp);
   return '';
 }
 
 /* 메일 한 통. 하루 한도를 지키고 기록을 남긴다. '' 성공 · 'off' 꺼짐 · 'limit' 오늘 한도 · 그 밖은 오류 */
-function sfpc_mail_send(string $to, string $subject, string $body, string $kind): string {
+function sfpc_mail_send(string $to, string $subject, string $body, string $kind, ?array $attach = null): string {
   $c = sfpc_mail_conf();
   if (!$c) return 'off';
   if (sfpc_mail_left() <= 0) return 'limit';
   if (!filter_var($to, FILTER_VALIDATE_EMAIL) || preg_match('/[\r\n<>]/', $to)) return '받는 주소가 올바르지 않습니다';
-  $e = sfpc_smtp_send($c, $to, $subject, $body);
+  $e = sfpc_smtp_send($c, $to, $subject, $body, $attach);
   db()->prepare("INSERT INTO sfpc_mail_log(to_email, kind, ok, err, created_at) VALUES(?,?,?,?,?)")
       ->execute([$to, $kind, $e === '' ? 1 : 0, mb_substr($e, 0, 300), now()]);
   return $e;

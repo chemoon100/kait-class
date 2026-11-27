@@ -904,6 +904,36 @@ step_worker() {
   sleep 3
   systemctl is-active judge-worker
   journalctl -u judge-worker -n 20 --no-pager
+  step_sfpc_backup   # [SFPC]
+}
+
+# [SFPC] DB 를 매일 새벽 4시(한국 시각)에 백업한다 — sfpc-cli.php backup. 서버 안에 14일치, 암호를 정했으면 메일로도 한 벌.
+step_sfpc_backup() {
+  [[ -f "$WEB_ROOT/sfpc-cli.php" ]] || return 0
+  cat > /etc/systemd/system/sfpc-backup.service <<UNIT
+[Unit]
+Description=SFPC database backup
+
+[Service]
+Type=oneshot
+User=www-data
+WorkingDirectory=$WEB_ROOT
+ExecStart=/usr/bin/php $WEB_ROOT/sfpc-cli.php backup
+UNIT
+  cat > /etc/systemd/system/sfpc-backup.timer <<'UNIT'
+[Unit]
+Description=SFPC database backup — every day 04:07 KST
+
+[Timer]
+OnCalendar=*-*-* 04:07:00 Asia/Seoul
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable --now sfpc-backup.timer
+  systemctl list-timers sfpc-backup.timer --no-pager | head -3
 }
 
 # ── KAIT-PLAY (코딩 게임) ───────────────────────────────────────
