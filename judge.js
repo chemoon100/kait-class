@@ -90,6 +90,10 @@ async function apiThenReload(action, data, confirmMsg){
   var after    = document.getElementById('afterBtns');
 
   var keystrokes = 0, pasteBlocked = 0, startedAt = Date.now(), timer = null;
+  /* [SFPC] 큰 코딩 창(tall) · 쓰던 코드와 지난 제출 불러오기(keep). 서버가 켜 줄 때만 — 평가에서는 keep 이 꺼져 있다 */
+  var tall     = box.dataset.tall === '1';
+  var keep     = box.dataset.keep === '1' && !assess;
+  var splitEl  = document.getElementById('probSplit');
 
   /* ═══ 편집기 ═══════════════════════════════════
      CodeMirror 를 textarea 위에 씌운다. 스크립트가 안 뜨면 평범한 textarea 가
@@ -206,7 +210,24 @@ async function apiThenReload(action, data, confirmMsg){
      코드 줄 수 + 1줄 (최소 7줄). 줄이 늘고 줄 때마다 따라간다.
      수업에서 코드와 실행 결과를 한 화면에 함께 보려는 것. */
   var MIN_ROWS = 7, EXTRA_ROWS = 1;
+  /* [SFPC] 큰 코딩 창: 높이를 화면에 맞춰 고정하고, 긴 코드는 창 안에서 스크롤한다.
+     나란히 볼 때는 화면 바닥까지, 넓게 볼 때는 화면 높이 거의 전부.
+     좁은 화면(980px 이하, 휴대폰)은 예전처럼 줄 수를 따라간다. */
+  function tallHeight() {
+    if (!tall || !ed || !splitEl || window.innerWidth <= 980) return 0;
+    var fr = document.getElementById('edFrame'), bar = fr.querySelector('.edbar');
+    var barH = bar ? bar.offsetHeight : 46;
+    if (splitEl.classList.contains('wide')) return Math.max(320, window.innerHeight - barH - 110);
+    /* 문제를 막 열었을 때(맨 위) 코딩 창과 제출 단추가 화면 바닥에 딱 닿는 높이.
+       문제가 길어 아래로 내려가면 오른쪽 칸이 화면 위에 붙고, 그 아래 남는 자리에 채점 결과 · 실행 결과가 나온다. */
+    var pane = box.closest('.pane');
+    var above = fr.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop;
+    var paneTop = splitEl.getBoundingClientRect().top + window.pageYOffset;
+    return Math.max(300, window.innerHeight - paneTop - above - barH - 14);
+  }
   function fitEditor() {
+    var th = tallHeight();
+    if (th) { ed.getWrapperElement().style.minHeight = '0'; ed.setSize(null, th); return; }
     if (ed) {
       var rows = Math.max(ed.lineCount() + EXTRA_ROWS, MIN_ROWS);
       /* 높이를 딱 정해 주어야 줄 번호 칸이 바닥까지 이어진다.
@@ -248,13 +269,98 @@ async function apiThenReload(action, data, confirmMsg){
     apply();
   })();
 
+  /* [SFPC] 넓게 보기 — 문제 · 예제 아래에 코딩 창을 크게. 고른 모양은 이 컴퓨터에 기억한다 */
+  (function () {
+    var wb = document.getElementById('wideBtn');
+    if (!tall || !wb || !splitEl) return;
+    function paint() {
+      var w = splitEl.classList.contains('wide');
+      wb.textContent = w ? '나란히 보기' : '넓게 보기';
+      wb.title = w ? '문제와 코딩 창을 좌우로 놓습니다' : '문제 아래에 코딩 창을 크게 놓습니다';
+      wb.hidden = window.innerWidth <= 980;
+      if (ed) ed.refresh();
+      fitEditor();
+    }
+    try { if (localStorage.getItem('sfpcWide') === '1') splitEl.classList.add('wide'); } catch (e) {}
+    wb.addEventListener('click', function () {
+      var w = splitEl.classList.toggle('wide');
+      try { localStorage.setItem('sfpcWide', w ? '1' : '0'); } catch (e) {}
+      paint();
+      if (w) document.getElementById('edFrame').scrollIntoView({ block: 'end' });
+    });
+    var rt = null;
+    window.addEventListener('resize', function () { clearTimeout(rt); rt = setTimeout(paint, 120); });
+    paint();
+    setTimeout(fitEditor, 300);   /* 글꼴이 늦게 뜨면 줄 높이가 달라진다 */
+  })();
+
+  /* [SFPC] 쓰던 코드 · 이전 제출
+     ① 쓰는 중인 코드는 이 브라우저에 저절로 보관한다 (계정 · 문제 · 묶음별). 새로 고치거나 다른 문제에 다녀와도 남아 있다.
+     ② '이전 제출' 을 누르면 그 코드와 언어가 들어온다. 되돌리기는 Ctrl+Z.
+     ③ 문제를 열었을 때 보관된 코드가 없으면 마지막 제출을 불러온다.
+     붙여넣기를 막은 묶음에서도 쓴다 — 자기가 친 코드를 이어 쓰는 것이다. 평가에서는 쓰지 않는다. */
+  (function () {
+    if (!keep) return;
+    var KEY = 'sfpcDraft:' + (box.dataset.uid || '0') + ':' + pid + ':' + (setId || 0);
+    var msg = document.getElementById('keepMsg'), clr = document.getElementById('keepClear'), prev = document.getElementById('prevSubs');
+    var saveT = null, quiet = false;
+    function say(t) { if (msg) msg.textContent = t || ''; if (clr) clr.hidden = getCode() === ''; fitEditor(); /* 안내 줄이 생기면 창 높이를 다시 맞춘다 */ }
+    function save() {
+      var c = getCode();
+      try {
+        if (c.trim() === '') localStorage.removeItem(KEY);
+        else if (c.length < 200000) localStorage.setItem(KEY, JSON.stringify({ l: langSel.value, c: c, t: Date.now() }));
+      } catch (e) {}
+      if (clr) clr.hidden = c === '';
+    }
+    function later() { if (quiet) return; clearTimeout(saveT); saveT = setTimeout(save, 500); }
+    function put(code, lang, fresh) {
+      if (lang && langSel.querySelector('option[value="' + lang + '"]')) {
+        langSel.value = lang;
+        if (ed) ed.setOption('mode', modeOf(lang));
+      }
+      quiet = true; setCode(code); quiet = false;
+      if (fresh && ed) ed.clearHistory();   /* 처음 불러온 것은 되돌리기의 바닥 — Ctrl+Z 로 빈 창이 되지 않게 */
+      if (!ed) fitEditor();
+      save();
+    }
+    function fetchSub(id, done) {
+      fetch(apiUrl + '?action=my_source&id=' + id + '&pid=' + pid)
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (j.ok) done(j); else say(j.error || '불러오지 못했습니다'); })
+        .catch(function () { say('불러오지 못했습니다. 다시 눌러 주세요.'); });
+    }
+    if (ed) ed.on('change', later); else document.addEventListener('input', function (e) { if (e.target && e.target.id === 'code') later(); });
+    langSel.addEventListener('change', later);
+    window.addEventListener('pagehide', function () { clearTimeout(saveT); save(); });
+
+    if (prev) prev.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('.pchip') : null;
+      if (!b) return;
+      var when = b.textContent.replace(/\s+/g, ' ').trim();
+      fetchSub(b.dataset.sub, function (j) { put(j.source, j.lang, false); say(when + ' 을 불러왔습니다 · 되돌리려면 Ctrl+Z'); focusCode(); });
+    });
+    if (clr) clr.addEventListener('click', function () { setCode(''); save(); say('비웠습니다 · 되돌리려면 Ctrl+Z'); focusCode(); });
+
+    var d = null;
+    try { d = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) {}
+    if (d && typeof d.c === 'string' && d.c.trim() !== '') { put(d.c, d.l, true); say('쓰던 코드를 불러왔습니다'); }
+    else {
+      var first = prev ? prev.querySelector('.pchip') : null;
+      if (first) fetchSub(first.dataset.sub, function (j) { if (getCode() === '') { put(j.source, j.lang, true); say('마지막 제출을 불러왔습니다'); } });
+    }
+  })();
+
   /* 언어를 바꾸면 문법 색칠도 따라간다. 코드는 저장하지 않으므로 그대로 둔다. */
   langSel.addEventListener('change', function () {
     if (ed) ed.setOption('mode', modeOf(langSel.value));
   });
 
   /* ── 결과 표시 ── */
-  function show(html) { out.innerHTML = html; out.hidden = false; }
+  function show(html) {
+    out.innerHTML = html; out.hidden = false;
+    if (tall && out.scrollIntoView) out.scrollIntoView({ block: 'nearest' });   /* [SFPC] 붙어 있는 칸 안에서 결과가 보이게 */
+  }
 
   /* 채점이 진행 중인지 (제출 ~ 결과가 나올 때까지).
      실행을 눌러도 이 동안에는 결과 상자를 숨기지 않는다 — 판정을 못 보고 지나치지 않게. */

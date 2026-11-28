@@ -925,3 +925,21 @@ a.setmark:hover{text-decoration:underline}
   .top .mainnav::-webkit-scrollbar{display:none}
   .top .mainnav a{flex:0 0 auto; white-space:nowrap}
 }
+
+/* ── [SFPC] 문제 화면: 큰 코딩 창 · 넓게 보기 · 이전 제출 ──────────────
+   나란히 볼 때는 오른쪽(코딩) 칸이 화면에 붙어 있고 문제 설명만 넘어간다.
+   넓게 보기(.wide)는 문제 → 예제 → 코딩 창 순서로 세로로 놓는다. */
+@media(min-width:981px){
+  .split.sfpc-tall:not(.wide) > .pane:last-child{position:sticky; top:12px; max-height:calc(100vh - 24px); overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin}
+  .split.sfpc-tall.wide{grid-template-columns:1fr}
+}
+.prevrow{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; min-height:0}
+.prevrow:has(#prevSubs:empty):has(#keepMsg:empty){display:none}
+.prevsubs{display:flex; align-items:center; gap:6px; overflow-x:auto; max-width:100%; scrollbar-width:none}
+.prevsubs:empty{display:none}
+.prevsubs .cap{font-size:12.5px; font-weight:700; color:var(--b600); white-space:nowrap}
+.pchip{flex:none; font:inherit; font-size:12.5px; line-height:1.3; padding:4px 9px; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--ink-2,#445); cursor:pointer; white-space:nowrap}
+.pchip:hover, .pchip:focus-visible{border-color:var(--b500); background:#F2F5FC}
+.pchip b{font-weight:700; color:#B4232A}
+.pchip b.pv-AC{color:#1B7F4B}
+.pchip b.pv-wait{color:var(--ink-3)}

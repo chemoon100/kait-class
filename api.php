@@ -156,6 +156,19 @@ switch ($action) {
   }
 
   /* ── 학생: 채점 결과 확인 (화면이 1초마다 물어본다) ── */
+  /* [SFPC] 내 지난 제출의 코드 — 문제 화면의 '이전 제출' 에서 눌러 편집기로 불러온다.
+     본인 것, 그 문제 것만. 평가 묶음은 주지 않는다 (다시 손으로 치게 하는 것이 평가의 목적이다). */
+  case 'my_source': {
+    $me = require_login();
+    $s = one("SELECT s.user_id, s.problem_id, s.lang, s.source_code, st.set_type
+              FROM submissions s LEFT JOIN sets st ON st.id = s.set_id WHERE s.id = ?", [(int)($_GET['id'] ?? 0)]);
+    if (!$s || (int)$s['user_id'] !== (int)$me['id'] || (int)$s['problem_id'] !== (int)($_GET['pid'] ?? 0)) {
+      jerr('내 제출만 불러올 수 있습니다', 403);
+    }
+    if (($s['set_type'] ?? '') === 'assessment') jerr('평가에서 낸 코드는 불러올 수 없습니다', 403);
+    jout(['ok' => true, 'lang' => (string)$s['lang'], 'source' => (string)$s['source_code']]);
+  }
+
   case 'poll': {
     $me = require_login();
     $sid = (int)($_GET['id'] ?? 0);

@@ -51,6 +51,10 @@ if ($u && !empty($_GET['set'])) {
 
 /* 묶음 안이면 그 묶음에서 허용한 언어만, 아니면 전체 */
 $allowLangs = $set ? set_langs($set) : array_keys(langs());
+/* [SFPC] 전용 사이트: 코딩 창을 화면 높이에 맞춰 크게 쓰고('넓게 보기' 로 세로 배치), 쓰던 코드 · 지난 제출을 다시 불러온다.
+   평가 묶음에서는 불러오지 않는다 — 통과한 뒤 코드를 비우고 다시 치게 하는 것이 평가다. */
+$sfTall = function_exists('sfpc_site') && sfpc_site();
+$sfKeep = $sfTall && !$isAssess;
 
 /* 편집기 문법 모드 — 운영 > 언어에서 정한 값을 그대로 넘긴다 */
 $langModes = [];
@@ -123,7 +127,7 @@ page_head(['title' => $p['prob_no'] . '. ' . $p['title'], 'root' => '', 'user' =
     <?php endforeach; ?>
   </div>
 
-  <div class="split">
+  <div class="split<?= $sfTall ? ' sfpc-tall' : '' ?>" id="probSplit">
     <!-- ── 왼쪽: 문제 ── -->
     <section class="pane">
       <h2 class="ph"><span class="emo" aria-hidden="true">📝</span>문제 설명</h2>
@@ -205,6 +209,7 @@ page_head(['title' => $p['prob_no'] . '. ' . $p['title'], 'root' => '', 'user' =
              data-set="<?= $setId !== null ? $setId : '' ?>"
              data-assess="<?= $isAssess ? '1' : '0' ?>"
              data-nopaste="<?= $noPaste ? '1' : '0' ?>"
+             data-tall="<?= $sfTall ? '1' : '0' ?>" data-keep="<?= $sfKeep ? '1' : '0' ?>" data-uid="<?= (int)$u['id'] ?>"
              data-pastemsg="<?= h($isAssess
                  ? '이 평가에서는 붙여넣기를 할 수 없습니다. 직접 입력하세요.'
                  : '이 수업에서는 붙여넣기를 할 수 없습니다. 직접 입력하세요.') ?>">
@@ -216,6 +221,7 @@ page_head(['title' => $p['prob_no'] . '. ' . $p['title'], 'root' => '', 'user' =
               <?php endforeach; ?>
             </select>
             <div class="grow"></div>
+            <?php if ($sfTall): ?><button class="btn sm" type="button" id="wideBtn" hidden title="문제 아래에 코딩 창을 크게 놓습니다">넓게 보기</button><?php endif; ?>
             <span class="fsbtns" id="fsBtns" hidden>
               <button class="btn sm" type="button" id="fsDown" title="글자 작게">−</button>
               <button class="btn sm" type="button" id="fsUp" title="글자 크게">＋</button>
@@ -230,6 +236,13 @@ page_head(['title' => $p['prob_no'] . '. ' . $p['title'], 'root' => '', 'user' =
                 : ($isAssess ? '이 평가에서는 붙여넣기를 할 수 없습니다. 직접 입력하세요.'
                              : '이 수업에서는 붙여넣기를 할 수 없습니다. 직접 입력하세요.');
           ?>
+          <?php if ($sfKeep): /* [SFPC] 이전 제출 — 누르면 그 코드와 언어가 편집기에 들어온다 */ ?>
+          <div class="prevrow">
+            <div class="prevsubs" id="prevSubs"><?php if ($mine): ?><span class="cap">이전 제출</span><?php foreach (array_slice($mine, 0, 6) as $m): ?><button type="button" class="pchip" data-sub="<?= (int)$m['id'] ?>" title="이 코드를 불러옵니다"><?= h(substr((string)$m['created_at'], 5, 11)) ?> <b class="pv-<?= h((string)($m['verdict'] ?: 'wait')) ?>"><?= h((string)($m['verdict'] ?: '채점 중')) ?></b> <?= h(lang_label($m['lang'])) ?></button><?php endforeach; endif; ?></div>
+            <span class="small muted" id="keepMsg" aria-live="polite"></span>
+            <button type="button" class="btn sm" id="keepClear" hidden>비우기</button>
+          </div>
+          <?php endif; ?>
           <!-- 코드창 + 버튼 줄을 한 테두리 안에 — 코드와 입력·출력 사이를 줄인다 -->
           <div class="edframe" id="edFrame">
             <textarea id="code" class="editor" spellcheck="false"
@@ -331,6 +344,8 @@ window.refreshMySubs = function () {
     d.innerHTML = html;
     var a = d.querySelector('#mySubs'), b = document.getElementById('mySubs');
     if (a && b) b.innerHTML = a.innerHTML;
+    var pa = d.querySelector('#prevSubs'), pb = document.getElementById('prevSubs');   /* [SFPC] 이전 제출 줄 */
+    if (pa && pb) pb.innerHTML = pa.innerHTML;
     var ph = d.querySelector('.phead'), me = document.querySelector('.phead');
     if (ph && me) me.innerHTML = ph.innerHTML;
     var an = d.querySelector('#acNote'), ao = document.getElementById('acNote');
