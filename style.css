@@ -943,3 +943,4 @@ a.setmark:hover{text-decoration:underline}
 .pchip b{font-weight:700; color:#B4232A}
 .pchip b.pv-AC{color:#1B7F4B}
 .pchip b.pv-wait{color:var(--ink-3)}
+#wideBtn[hidden], #keepClear[hidden]{display:none}   /* .btn 의 display 가 hidden 을 덮지 않게 */
