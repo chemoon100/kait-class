@@ -443,6 +443,9 @@ function set_my_progress(int $uid, int $sid, bool $isAssess): array {
 /* 이 묶음에서 쓸 수 있는 언어 키 목록. 값이 이상하면 전체를 허용한다. */
 function set_langs(?array $s): array {
   $on  = langs();
+  /* [SFPC] 전용 사이트에서는 묶음마다 따로 고르지 않는다 — 운영 > 언어에서 켠 언어가 모든 묶음에 그대로 적용된다.
+     묶음을 만들 때의 목록이 적혀 있어서, 뒤에 언어를 바꾸면(C → C/C++) 새 언어가 빠지고 Python 만 남던 문제. */
+  if (function_exists('sfpc_site') ? sfpc_site() : setting('sfpc_site') !== '0') return array_keys($on);   /* 값이 없으면 켜진 것(기본값) — sfpc_lib 를 읽지 않는 api.php 에서도 같게 */
   $raw = $s['langs'] ?? '';
   $out = [];
   foreach (explode(',', (string)$raw) as $k) {

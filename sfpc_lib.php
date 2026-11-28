@@ -26,7 +26,7 @@ if (PHP_SAPI !== 'cli' && !defined('SFPC_REQ_LOGGED')) {
 }
 
 /* 표 구조를 바꿀 때마다 1씩 올린다 */
-const SFPC_SCHEMA = 16;
+const SFPC_SCHEMA = 17;
 
 /* 올해 대회. 내년에는 이 값과 설정만 바꾸면 접수를 새로 받을 수 있다. */
 const SFPC_CONTEST = '2026';
@@ -318,6 +318,9 @@ if ((int)sfpc_setting('sfpc_schema') !== SFPC_SCHEMA) {
   db()->exec("CREATE INDEX IF NOT EXISTS idx_sfpc_jud_round ON sfpc_judgements(round_id, id)");
   /* 14 · 16 — 지도교사 이메일 인증, 비밀번호 다시 정하기 (sfpc_mail.php). 인증한 주소 · 인증번호 · 보낸 메일 기록. */
   sfpc_mail_schema();
+  /* 17 — 지도교사 본인의 개인정보 수집 · 이용 동의 시각 (가입 화면에서 받는다) */
+  $ccols = array_column(db()->query("PRAGMA table_info(sfpc_coaches)")->fetchAll(PDO::FETCH_ASSOC), 'name');
+  if (!in_array('consent_at', $ccols, true)) db()->exec("ALTER TABLE sfpc_coaches ADD COLUMN consent_at TEXT NOT NULL DEFAULT ''");
   /* 15 — 계정마다 처음 · 마지막으로 들어온 때 (sfpc_seen_touch). "한 번이라도 로그인한 팀인가" · "지금 누가 들어와 있나"에 쓴다. */
   db()->exec("CREATE TABLE IF NOT EXISTS sfpc_seen(
     user_id INTEGER PRIMARY KEY, first_at TEXT NOT NULL, last_at TEXT NOT NULL, page TEXT NOT NULL DEFAULT '')");

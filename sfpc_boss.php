@@ -111,13 +111,16 @@ sfpc_css();
     return fetch(location.href, { method: 'POST', body: fd, credentials: 'same-origin' }).then(function (r) { return r.json(); });
   }
   function label() {
-    if (state === 'idle') { btn.disabled = !TEAM; btn.textContent = !TEAM ? '운영진 미리 보기 (기록 없음)' : (DONE ? (NEXT === 'sfpc_grad.php' ? '수료 축하 보러 가기 →' : '지도로 돌아가기 →') : '시작 (스페이스)'); btn.classList.toggle('go', DONE); }
+    if (state === 'idle') { btn.disabled = false; btn.textContent = !TEAM ? '운영진 연습 시작 (스페이스) · 기록 없음' : (DONE ? (NEXT === 'sfpc_grad.php' ? '수료 축하 보러 가기 →' : '지도로 돌아가기 →') : '시작 (스페이스)'); btn.classList.toggle('go', DONE); }
     if (state === 'count') { btn.disabled = true; btn.textContent = '준비…'; }
     if (state === 'play') { btn.disabled = false; btn.textContent = '여기를 두드려도 됩니다 (스페이스)'; }
     if (skip) skip.hidden = state !== 'idle' || DONE;
   }
   function start() {
-    if (state !== 'idle' || !TEAM) return;
+    if (state !== 'idle') return;
+    if (!TEAM) {   /* 운영진 연습: 서버를 거치지 않는다 — 기록도 순위도 없다. 몇 번이든 다시 할 수 있다 */
+      cnt = 0; down = false; msg.textContent = ''; state = 'count'; cdAt = performance.now(); label(); return;
+    }
     if (DONE) { location.href = NEXT; return; }
     btn.disabled = true; msg.textContent = '';
     post({ act: 'start' }).then(function (j) {
@@ -126,7 +129,9 @@ sfpc_css();
     }).catch(function () { msg.textContent = '서버에 닿지 못했습니다. 다시 눌러 주세요.'; label(); });
   }
   function finish(beacon) {
-    if (state !== 'play') return; state = 'sending';
+    if (state !== 'play') return;
+    if (!TEAM) { state = 'idle'; msg.textContent = cnt + '회! (운영진 연습 — 기록에 남지 않습니다. 다시 하려면 시작을 누르세요)'; label(); return; }
+    state = 'sending';
     if (beacon && navigator.sendBeacon) { var fd = new FormData(); fd.append(tokIn.name, tokIn.value); fd.append('act', 'finish'); fd.append('id', id); fd.append('cnt', cnt); navigator.sendBeacon(location.href, fd); return; }
     btn.disabled = true; btn.textContent = '기록하는 중…';
     post({ act: 'finish', id: id, cnt: cnt }).then(function (j) {
@@ -148,7 +153,7 @@ sfpc_css();
   document.addEventListener('keydown', function (e) {
     if (e.code !== 'Space' && e.key !== ' ') return;
     e.preventDefault(); if (e.repeat) return;                    /* 꾹 누르기는 세지 않는다 */
-    if (state === 'idle') { if (!DONE) start(); } else tap();    /* 끝난 뒤의 스페이스로 화면이 넘어가 버리지 않게, 이동은 버튼으로만 */
+    if (state === 'idle') { if (!DONE || !TEAM) start(); } else tap();    /* 끝난 뒤의 스페이스로 화면이 넘어가 버리지 않게, 이동은 버튼으로만 */
   });
   btn.addEventListener('pointerdown', function (e) { if (state === 'play') { e.preventDefault(); tap(); } });
   btn.addEventListener('click', function () { if (state === 'idle') start(); });

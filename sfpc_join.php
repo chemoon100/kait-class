@@ -43,6 +43,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $err = '화면을 연 지 오래되었습니다. 다시 시도해 주세요.';
   } elseif (trim((string)($_POST['homepage'] ?? '')) !== '') {
     $err = '신청을 처리하지 못했습니다.';            /* 사람 눈에 안 보이는 칸을 채웠다 = 자동 프로그램 */
+  } elseif (!$coach && empty($_POST['agree'])) {
+    $err = '개인정보 수집 · 이용에 동의해야 가입할 수 있습니다.';   /* 이름 · 연락처 · 이메일을 받기 전에 동의부터 */
   } elseif ($needAccount && !preg_match(SFPC_ID_RE, $in['id'])) {
     $err = '아이디는 영문으로 시작하는 4~20자여야 합니다. 영문 · 숫자 · 밑줄 · 점 · 붙임표만 쓸 수 있습니다.';
   } elseif ($needAccount && strlen($pw) < 8) {
@@ -74,9 +76,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
           $uid = (int)$u['id'];
         }
-        $d->prepare("INSERT INTO sfpc_coaches(user_id, name, phone, email, created_at) VALUES(?,?,?,?,?)
+        $d->prepare("INSERT INTO sfpc_coaches(user_id, name, phone, email, created_at, consent_at) VALUES(?,?,?,?,?,?)
                      ON CONFLICT(user_id) DO UPDATE SET name = excluded.name, phone = excluded.phone, email = excluded.email")
-          ->execute([$uid, $in['name'], $phone, $in['email'], now()]);
+          ->execute([$uid, $in['name'], $phone, $in['email'], now(), now()]);   /* consent_at 은 처음 등록할 때의 동의 시각 — 고칠 때는 바뀌지 않는다 */
         return $uid;
       });
       if ($needAccount) {
@@ -128,6 +130,20 @@ sfpc_css();
         대회 안내와 계정 전달에 쓰는 정보입니다.
       <?php endif; ?>
     </p>
+
+    <?php if (!$coach): /* 처음 등록할 때만 — 정보를 받기 전에 알리고 동의를 받는다 */ ?>
+      <div class="sfpc-consent" id="joinConsent">
+        <p><b>개인정보 수집 · 이용 안내</b></p>
+        <ul><li><b>수집 항목</b> 지도교사(신청인)의 이름, 연락처, 이메일<?= $needAccount ? ', 아이디' : '' ?></li>
+            <li><b>이용 목적</b> 본인 확인, 참가 접수와 확인, 대회 운영과 안내</li>
+            <li><b>보유 기간</b> 대회가 끝나고 결과 정리를 마칠 때까지 보관한 뒤 파기합니다.</li></ul>
+        <p>동의하지 않을 수 있으나, 그 경우 참가 신청을 할 수 없습니다. 팀원의 정보는 팀을 신청할 때 따로 안내하고 동의를 받습니다.</p>
+      </div>
+      <label class="sfpc-agree">
+        <input type="checkbox" name="agree" value="1" id="jagree"<?= !empty($_POST['agree']) ? ' checked' : '' ?> required>
+        <span>위 내용을 확인했으며, 개인정보 수집 · 이용에 동의합니다.</span>
+      </label>
+    <?php endif; ?>
 
     <?php if ($needAccount): ?>
       <div class="field">
