@@ -6,6 +6,7 @@ require __DIR__ . '/layout.php';
 $u = need_login();
 
 $err = ''; $msg = '';
+$pwMin = (function_exists('sfpc_site') && sfpc_site()) ? 8 : 4;   /* [SFPC] 가입 · 비밀번호 찾기와 같은 기준 (8자) */
 
 if (DEMO_MODE) {
   $err = DEMO_BLOCKED;
@@ -17,8 +18,8 @@ if (DEMO_MODE) {
   $row = one("SELECT pw_hash FROM users WHERE id = ?", [$u['id']]);
   if (!$row || !password_verify($cur, $row['pw_hash'])) {
     $err = '지금 비밀번호가 맞지 않습니다.';
-  } elseif (ustrlen($pw) < 4) {
-    $err = '새 비밀번호는 4자 이상이어야 합니다.';
+  } elseif (ustrlen($pw) < $pwMin) {
+    $err = '새 비밀번호는 ' . $pwMin . '자 이상이어야 합니다.';
   } elseif ($pw !== $pw2) {
     $err = '새 비밀번호와 확인이 서로 다릅니다.';
   } elseif ($pw === $cur) {
@@ -48,7 +49,7 @@ page_head(['title' => '비밀번호 변경', 'root' => '', 'user' => $u, 'nav' =
         <input type="password" id="cur" name="cur" autocomplete="current-password" autofocus>
       </div>
       <div class="field">
-        <label for="pw">새 비밀번호 <span class="hint">4자 이상</span></label>
+        <label for="pw">새 비밀번호 <span class="hint"><?= $pwMin ?>자 이상</span></label>
         <input type="password" id="pw" name="pw" autocomplete="new-password">
       </div>
       <div class="field">
