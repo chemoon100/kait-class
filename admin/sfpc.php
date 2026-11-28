@@ -267,6 +267,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $status = (string)($_POST['status'] ?? '');
     $memo   = sfpc_clean((string)($_POST['memo'] ?? ''), 200);
     if (!isset(SFPC_TRACK_NAME[$track]) || !isset(SFPC_STATUS_NAME[$status])) redirect_with('', '값을 확인해 주세요.');
+    if ($status === 'submitted' && $t['status'] !== 'submitted' && sfpc_team_name_taken((string)$t['team_name'], (int)$t['id'])) {
+      redirect_with('', '"' . $t['team_name'] . '" 팀명으로 접수된 다른 팀이 있어 되살릴 수 없습니다. 팀명을 먼저 바꿔 주세요.');
+    }
     db()->prepare("UPDATE sfpc_teams SET track = ?, status = ?, admin_memo = ?, updated_at = ? WHERE id = ?")
         ->execute([$track, $status, $memo, now(), $t['id']]);
     $chg = [];
@@ -312,6 +315,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($phone === '')      redirect_with('', '연락처를 확인해 주세요. 예: 010-1234-5678');
     if ($email !== '' && (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 100)) redirect_with('', '이메일 주소를 확인해 주세요.');
     if ($pw !== '' && strlen($pw) < 8) redirect_with('', '새 비밀번호는 8자 이상이어야 합니다.');
+    if (sfpc_email_taken($email, $uid)) redirect_with('', '다른 지도교사가 쓰고 있는 이메일 주소입니다.');
     if ($pw !== '' && $c['role'] === 'admin') redirect_with('', '운영진 계정의 비밀번호는 여기서 바꾸지 않습니다.');
     db()->prepare("UPDATE sfpc_coaches SET name = ?, phone = ?, email = ? WHERE user_id = ?")->execute([$name, $phone, $email, $uid]);
     /* 운영진이 전화 등으로 주소를 직접 확인했을 때 — 인증 메일이 닿지 않는 선생님을 위해 */
@@ -347,6 +351,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($phone === '')      redirect_with('', '연락처를 확인해 주세요. 예: 010-1234-5678');
     if ($email !== '' && (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 100)) redirect_with('', '이메일 주소를 확인해 주세요.');
     if (one("SELECT 1 FROM users WHERE login_id = ?", [$id])) redirect_with('', '이미 쓰이고 있는 아이디입니다.');
+    if (sfpc_email_taken($email)) redirect_with('', '다른 지도교사가 쓰고 있는 이메일 주소입니다.');
     $uid = (int)tx(function (PDO $d) use ($id, $pw, $name, $phone, $email) {
       $d->prepare("INSERT INTO users(login_id, pw_hash, name, role, group_id, source, approved, created_at)
                    VALUES(?,?,?,'student',NULL,'sfpc',1,?)")->execute([$id, password_hash($pw, PASSWORD_DEFAULT), $name, now()]);

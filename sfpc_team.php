@@ -133,10 +133,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   if (!$byAdmin && empty($_POST['agree'])) $errs[] = '개인정보 수집 · 이용에 동의해야 신청할 수 있습니다.';
 
-  /* 같은 학교에 같은 팀명이 있으면 스코어보드에서 구분되지 않는다 */
-  if (!$errs && one("SELECT 1 FROM sfpc_teams WHERE contest = ? AND status = 'submitted' AND school_name = ?
-                     AND team_name = ? AND id <> ?", [SFPC_CONTEST, $in['school_name'], $in['team_name'], $id])) {
-    $errs[] = '같은 학교에 같은 이름의 팀이 이미 있습니다. 팀명을 바꿔 주세요.';
+  /* 팀명은 대회 전체에서 하나씩 — 스코어보드에서 구분되지 않는다 (11/28: 같은 학교 안에서만 막던 것을 전체로) */
+  if (!$errs && sfpc_team_name_taken($in['team_name'], (int)$id)) {
+    $errs[] = '"' . $in['team_name'] . '" 은(는) 이미 접수된 팀명입니다. 다른 팀명으로 바꿔 주세요.';
   }
 
   if (!$errs) {

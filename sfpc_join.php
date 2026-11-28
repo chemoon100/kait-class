@@ -63,6 +63,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $err = '이메일 주소의 "' . $typo[0] . '" 는 "' . $typo[1] . '" 의 오타로 보입니다. 확인해 주세요.';
   } elseif (strcasecmp($in['email'], trim((string)($_POST['email2'] ?? ''))) !== 0) {
     $err = '이메일 주소를 두 번 똑같이 입력해 주세요.';
+  } elseif (sfpc_email_taken($in['email'], $coach ? (int)$coach['user_id'] : 0)) {
+    $err = '이미 가입된 이메일 주소입니다. 전에 가입하셨다면 로그인 화면의 "아이디 · 비밀번호 찾기"를 이용해 주세요.';
   } elseif ($needAccount && one("SELECT 1 FROM users WHERE login_id = ?", [$in['id']])) {
     $err = '이미 쓰이고 있는 아이디입니다.';
   } else {

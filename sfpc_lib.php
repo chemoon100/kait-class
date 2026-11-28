@@ -561,6 +561,22 @@ const SFPC_EMAIL_TYPO = [
   'daum.con' => 'daum.net', 'daum.com' => 'daum.net', 'duam.net' => 'daum.net', 'hanmail.com' => 'hanmail.net', 'hanmail.con' => 'hanmail.net',
   'kakao.con' => 'kakao.com', 'kakao.net' => 'kakao.com',
 ];
+/* 팀명 · 이메일은 대회 안에서 하나씩만 (11/28 정함).
+   팀명: 접수된 팀끼리 겹치지 않는다. 띄어쓰기 · 영문 대소문자만 다른 것도 같은 이름으로 본다 (스코어보드에서 구분되지 않는다).
+   이메일: 지도교사 계정끼리 겹치지 않는다 — 한 주소에 계정이 둘이면 아이디 · 비밀번호 찾기가 한쪽만 찾는다. */
+function sfpc_team_name_taken(string $name, int $exceptId = 0): bool {
+  $key = fn(string $s): string => mb_strtolower(preg_replace('/\s+/u', '', $s) ?? $s);
+  $want = $key($name);
+  foreach (all("SELECT team_name FROM sfpc_teams WHERE contest = ? AND status = 'submitted' AND id <> ?", [SFPC_CONTEST, $exceptId]) as $r) {
+    if ($key((string)$r['team_name']) === $want) return true;
+  }
+  return false;
+}
+function sfpc_email_taken(string $email, int $exceptUid = 0): bool {
+  $email = trim($email);
+  if ($email === '') return false;
+  return (bool)one("SELECT 1 FROM sfpc_coaches WHERE lower(email) = lower(?) AND user_id <> ?", [$email, $exceptUid]);
+}
 function sfpc_email_typo(string $email) {
   $d = strtolower((string)substr(strrchr($email, '@') ?: '', 1));
   return isset(SFPC_EMAIL_TYPO[$d]) ? [$d, SFPC_EMAIL_TYPO[$d]] : '';

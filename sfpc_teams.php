@@ -55,6 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$viewAs) {
     redirect_with('"' . $t['team_name'] . '" 팀 신청을 취소했습니다.');
   }
   if ($act === 'restore' && $t['status'] === 'canceled') {
+    if (sfpc_team_name_taken((string)$t['team_name'], (int)$t['id'])) redirect_with('', '취소해 둔 사이에 "' . $t['team_name'] . '" 팀명으로 다른 팀이 접수했습니다. 운영진에게 문의해 주세요.');
     db()->prepare("UPDATE sfpc_teams SET status = 'submitted', updated_at = ? WHERE id = ?")->execute([now(), $t['id']]);
     sfpc_log((int)$t['id'], (int)$u['id'], $u, 'restore', '지도교사가 다시 접수');
     sfpc_account_sync((int)$t['id']);
